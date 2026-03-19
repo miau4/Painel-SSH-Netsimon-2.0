@@ -1,106 +1,106 @@
 #!/bin/bash
 
-clear
-echo "===================================="
-echo "   INSTALADOR NETSIMON ENTERPRISE"
-echo "===================================="
+# ===============================
+# CONFIGURAÇÕES E CORES
+# ===============================
+BASE="/etc/painel"
+XRAY_MGR="/etc/xray-manager"
+REPO="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main"
 
-# ===============================
-# ROOT CHECK
-# ===============================
+GREEN='\033[1;32m'
+RED='\033[1;31m'
+CYAN='\033[1;36m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Lista de arquivos que DEVEM estar no seu repositório GitHub
+FILES=(
+"menu.sh"
+"xray.sh"
+"websocket.sh"
+"slowdns-server.sh"
+"adduser.sh"
+"deluser.sh"
+"online.sh"
+"limit.sh"
+"unblock.sh"
+)
+
+clear
+echo -e "${CYAN}══════════════════════════════════════════${NC}"
+echo -e "${GREEN}    INSTALADOR NETSIMON ENTERPRISE 2.0    ${NC}"
+echo -e "${CYAN}══════════════════════════════════════════${NC}"
+
+# 1. ROOT CHECK
 if [ "$EUID" -ne 0 ]; then
-    echo "Execute como root!"
+    echo -e "${RED}Erro: Execute como root!${NC}"
     exit 1
 fi
 
-# ===============================
-# VARIÁVEIS
-# ===============================
-BASE="/etc/painel"
-REPO="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main"
-
-FILES=(
-menu.sh
-xray.sh
-websocket.sh
-slowdns-server.sh
-adduser.sh
-deluser.sh
-online.sh
-limit.sh
-unblock.sh
-)
-
-# ===============================
-# INSTALAR DEPENDÊNCIAS
-# ===============================
-echo "[+] Instalando dependências..."
+# 2. INSTALAR DEPENDÊNCIAS
+echo -e "${YELLOW}[1/5] Instalando dependências essenciais...${NC}"
 apt update -y
-apt install -y curl wget jq nginx
+apt install -y curl wget jq nginx golang bsdmainutils &>/dev/null
 
-# ===============================
-# CRIAR ESTRUTURA
-# ===============================
-echo "[+] Criando estrutura..."
-mkdir -p $BASE
-mkdir -p /etc/xray-manager
+# 3. CRIAR ESTRUTURA DE PASTAS E BANCO
+echo -e "${YELLOW}[2/5] Criando estrutura de diretórios...${NC}"
+mkdir -p "$BASE"
+mkdir -p "$XRAY_MGR"
+mkdir -p "/etc/xray"
 
-touch /etc/xray-manager/users.xray
-touch /etc/xray-manager/blocked.db
+# Criando arquivos de banco de dados se não existirem
+[ ! -f "$XRAY_MGR/users.db" ] && touch "$XRAY_MGR/users.db"
+[ ! -f "$XRAY_MGR/blocked.db" ] && touch "$XRAY_MGR/blocked.db"
 
-# ===============================
-# DOWNLOAD DOS ARQUIVOS
-# ===============================
-echo "[+] Baixando arquivos..."
+# 4. DOWNLOAD DOS ARQUIVOS DO GITHUB
+echo -e "${YELLOW}[3/5] Baixando scripts do repositório...${NC}"
 
 for file in "${FILES[@]}"; do
-    echo " - $file"
-
-    wget -q -O $BASE/$file $REPO/$file
+    echo -e "  ${CYAN}下载:${NC} $file"
+    # Baixa o arquivo do GitHub sobrescrevendo o antigo
+    wget -q -O "$BASE/$file" "$REPO/$file"
 
     if [ ! -s "$BASE/$file" ]; then
-        echo "Erro ao baixar $file"
+        echo -e "${RED}Erro crítico: Falha ao baixar $file${NC}"
+        echo -e "${YELLOW}Verifique se o nome do arquivo no GitHub está correto.${NC}"
         exit 1
     fi
+    chmod +x "$BASE/$file"
 done
 
-# ===============================
-# PERMISSÕES
-# ===============================
-chmod +x $BASE/*.sh
+# 5. CONFIGURAÇÃO GLOBAL E ATALHOS
+echo -e "${YELLOW}[4/5] Configurando atalhos do sistema...${NC}"
 
-# ===============================
-# COMANDO GLOBAL
-# ===============================
-ln -sf $BASE/menu.sh /usr/local/bin/menu
-chmod +x /usr/local/bin/menu
+# Atalho 'p' ou 'menu' para abrir o painel
+cat > "/usr/local/bin/p" <<EOF
+#!/bin/bash
+bash $BASE/menu.sh
+EOF
+chmod +x "/usr/local/bin/p"
+ln -sf /usr/local/bin/p /usr/local/bin/menu
 
-# ===============================
-# XRAY CONFIG BASE
-# ===============================
+# 6. CONFIGURAÇÃO INICIAL DO XRAY (Evita erro de JSON vazio)
 if [ ! -f /etc/xray/config.json ]; then
-    echo "[+] Criando config base do Xray..."
-
-    mkdir -p /etc/xray
-
+    echo -e "${YELLOW}[5/5] Criando config base do Xray...${NC}"
     cat > /etc/xray/config.json <<EOF
 {
+  "log": { "loglevel": "warning" },
   "inbounds": [],
-  "outbounds": [
-    {
-      "protocol": "freedom"
-    }
-  ]
+  "outbounds": [{ "protocol": "freedom" }]
 }
 EOF
 fi
 
 # ===============================
-# FINAL
+# FINALIZAÇÃO
 # ===============================
-echo ""
-echo "===================================="
-echo " INSTALAÇÃO CONCLUÍDA"
-echo "===================================="
-echo "Comando: menu"
-echo ""
+clear
+echo -e "${GREEN}══════════════════════════════════════════${NC}"
+echo -e "${GREEN}       INSTALAÇÃO CONCLUÍDA COM SUCESSO!  ${NC}"
+echo -e "${GREEN}══════════════════════════════════════════${NC}"
+echo -e "${WHITE}Comando para abrir o painel:${NC} ${YELLOW}p${NC} ou ${YELLOW}menu${NC}"
+echo -e "${CYAN}Diretório dos scripts:${NC} $BASE"
+echo -e "${GREEN}══════════════════════════════════════════${NC}"
+
+read -p "Deseja abrir o painel agora? (s/n): " abrir
+[[ "$abrir" == "s" || "$abrir" == "S" ]] && bash "$BASE/menu.sh"
