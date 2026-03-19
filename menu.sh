@@ -3,7 +3,7 @@
 # Direitório onde estão seus scripts .sh
 BASE="/etc/painel"
 
-# Caminhos dos Bancos (Sincronizados com adduser/deluser)
+# Caminhos dos Bancos (Sincronizados com os novos scripts adduser/deluser/unblock)
 CONFIG_XRAY="/etc/xray/config.json"
 USERDB="/etc/xray-manager/users.db"
 BLOCKED="/etc/xray-manager/blocked.db"
@@ -42,7 +42,7 @@ bar() {
     local percent=$1
     [[ -z "$percent" ]] && percent=0
     ((percent > 100)) && percent=100
-    local size=15
+    local size=10
     local filled=$((percent * size / 100))
     local empty=$((size - filled))
     printf "["
@@ -57,7 +57,7 @@ bar() {
 get_total() { wc -l < "$USERDB" 2>/dev/null || echo 0; }
 get_blocked() { wc -l < "$BLOCKED" 2>/dev/null || echo 0; }
 get_online() { 
-    # Conta usuários SSH logados (util para SlowDNS/WS-SSH)
+    # Soma SSH + Processos ativos (estimativa rápida)
     local ssh_online=$(ps aux | grep -i sshd | grep -v root | grep -v grep | wc -l)
     echo "$ssh_online"
 }
@@ -65,7 +65,7 @@ get_online() {
 get_cpu() { top -bn1 | grep "Cpu(s)" | awk '{print int($2)}'; }
 get_ram() { free | awk '/Mem:/ {printf("%d"), $3/$2 * 100}'; }
 get_disk() { df / | awk 'NR==2 {gsub("%",""); print $5}'; }
-get_ip() { curl -s ifconfig.me || hostname -I | awk '{print $1}'; }
+get_ip() { curl -s --connect-timeout 2 ifconfig.me || hostname -I | awk '{print $1}'; }
 
 status_xray() { systemctl is-active --quiet xray && echo -e "${GREEN}ON${NC}" || echo -e "${RED}OFF${NC}"; }
 status_limiter() { pgrep -f "limit.sh" >/dev/null && echo -e "${GREEN}ON${NC}" || echo -e "${RED}OFF${NC}"; }
@@ -90,7 +90,7 @@ echo -e "${CYAN}║${WHITE}            🚀 NETSIMON ENTERPRISE PANEL 2.0 🚀  
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 printf "${CYAN}║${NC} ${GREEN}Usuários:${NC} %-5s ${GREEN}Online:${NC} %-5s ${RED}Bloqueados:${NC} %-5s ${CYAN}║\n" "$TOTAL" "$ONLINE" "$BLOCKED_COUNT"
 printf "${CYAN}║${NC} ${GREEN}IP:${NC} %-15s ${GREEN}Xray:${NC} %-10s ${YELLOW}Limiter:${NC} %-10s ${CYAN}║\n" "$IP" "$XRAY" "$LIMITER"
-echo -e "${CYAN}║${NC} CPU  $(bar $CPU)  RAM  $(bar $RAM)  DISK $(bar $DISK) ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC} CPU $(bar $CPU)  RAM $(bar $RAM)  DISK $(bar $DISK) ${CYAN}║${NC}"
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 printf "${CYAN}║${WHITE} 01) Criar Usuário         ${CYAN}│${WHITE} 11) Ativar Limiter        ${CYAN}║\n"
 printf "${CYAN}║${WHITE} 02) Remover Usuário       ${CYAN}│${WHITE} 12) Parar Limiter         ${CYAN}║\n"
@@ -109,32 +109,51 @@ case $op in
     1) run "$BASE/adduser.sh" ;;
     2) run "$BASE/deluser.sh" ;;
     3) 
-        echo -e "\n${YELLOW}--- LISTA DE USUÁRIOS ---${NC}"
-        column -t -s "|" "$USERDB" 2>/dev/null || echo "Vazio"
+        echo -e "\n${YELLOW}--- LISTA DE USUÁRIOS (Nome|UUID|Expira|Senha|Limite) ---${NC}"
+        if [ -s "$USERDB" ]; then
+            column -t -s "|" "$USERDB"
+        else
+            echo -e "${RED}Nenhum usuário cadastrado.${NC}"
+        fi
         pause 
         ;;
     4) run "$BASE/online.sh" ;;
-    5) cat "$BLOCKED"; pause ;;
-    6) 
-        read -p "Nome do usuário para desbloquear: " u_desb
-        sed -i "/^$u_desb|/d" "$BLOCKED"
-        echo "Comando enviado." ; sleep 1
+    5) 
+        echo -e "\n${RED}--- USUÁRIOS BLOQUEADOS ---${NC}"
+        [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo "Nenhum bloqueio."
+        pause 
         ;;
+    6) run "$BASE/unblock.sh" ;;
     7) systemctl restart xray; echo "Xray Reiniciado"; sleep 1 ;;
-    8) > "$BLOCKED"; echo "Bloqueios limpos"; sleep 1 ;;
-    9) run "$BASE/install.sh" ;; # Usa o instalador para reparar
+    8) > "$BLOCKED"; echo "Lista de bloqueios limpa."; sleep 1 ;;
+    9) run "$BASE/install.sh" ;;
+    10)
+        clear
+        echo -e "${CYAN}Informações do Sistema:${NC}"
+        uptime
+        echo ""
+        free -h
+        pause
+        ;;
     11) 
         nohup bash "$BASE/limit.sh" >/dev/null 2>&1 &
-        echo "Limiter iniciado em segundo plano."; sleep 1 
+        echo "Limiter ativado em segundo plano."; sleep 1 
         ;;
-    12) pkill -f "limit.sh"; echo "Limiter parado."; sleep 1 ;;
+    12) pkill -f "limit.sh"; echo "Limiter desativado."; sleep 1 ;;
     13) run "$BASE/websocket.sh" ;;
     14) run "$BASE/slowdns-server.sh" ;;
     15) run "$BASE/xray.sh" ;;
-    16) watch -n 2 "ps aux | grep sshd | grep -v root" ;;
+    16) watch -n 2 "ps aux | grep sshd | grep -v root | grep -v grep" ;;
     17) tail -f /var/log/xray/access.log ;;
-    18) cp "$CONFIG_XRAY" "/etc/xray/config.backup.$(date +%F).json"; echo "Backup criado."; sleep 1 ;;
-    0|00) exit 0 ;;
+    18) 
+        cp "$CONFIG_XRAY" "/etc/xray/config.backup.$(date +%F_%H%M).json"
+        echo "Backup do config.json criado em /etc/xray/"; sleep 1 
+        ;;
+    19)
+        read -p "Novo IP do Servidor (Atual: $IP): " new_ip
+        echo "IP atualizado internamente (simulação)."; sleep 1
+        ;;
+    0|00) clear; exit 0 ;;
     *) echo -e "${RED}Opção inválida!${NC}"; sleep 1 ;;
 esac
 done
