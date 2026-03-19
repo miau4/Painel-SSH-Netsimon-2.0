@@ -1,110 +1,68 @@
 #!/bin/bash
 
-USERS="/etc/xray-manager/users.xray"
-LOG="/var/log/xray/access.log"
-BLOCKED="/etc/xray-manager/blocked.db"
-CONFIG="/etc/xray/config.json"
+# Caminhos Sincronizados
+USERS_DB="/etc/xray-manager/users.db"
+BLOCKED_DB="/etc/xray-manager/blocked.db"
+XRAY_LOG="/var/log/xray/access.log"
+XRAY_CONF="/etc/xray/config.json"
 
-GREEN='\033[1;32m'
+# Cores
 RED='\033[1;31m'
+GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
-CYAN='\033[1;36m'
 NC='\033[0m'
 
+# Criar arquivos se não existirem
 mkdir -p /etc/xray-manager
-[ ! -f "$USERS" ] && touch "$USERS"
-[ ! -f "$BLOCKED" ] && touch "$BLOCKED"
+[ ! -f "$BLOCKED_DB" ] && touch "$BLOCKED_DB"
 
-echo -e "${CYAN}=== LIMITER XRAY (PRO) ===${NC}"
-
-# -------------------------------
-# VERIFICA XRAY
-# -------------------------------
-if ! command -v xray >/dev/null 2>&1; then
-    echo -e "${RED}Xray não encontrado!${NC}"
-    exit
-fi
+echo -e "${YELLOW}Iniciando Monitor de Limite (NETSIMON 2.0)...${NC}"
 
 while true; do
-
-    NOW=$(date +%s)
-
+    # Loop pelos usuários no banco de dados
     while IFS="|" read -r user uuid exp pass limit; do
-
         [[ -z "$user" ]] && continue
         [[ ! "$limit" =~ ^[0-9]+$ ]] && limit=1
 
-        # -------------------------------
-        # JÁ BLOQUEADO?
-        # -------------------------------
-        if grep -q "^$user|" "$BLOCKED"; then
+        # Pula se o usuário já estiver na lista de bloqueados
+        if grep -q "^$user|" "$BLOCKED_DB"; then
             continue
         fi
 
-        # -------------------------------
-        # CONEXÕES (API)
-        # -------------------------------
-        connections=0
+        # --- 1. CONTAGEM SSH/SLOWDNS (Conexões Ativas) ---
+        con_ssh=$(ps aux | grep -i sshd | grep -v root | grep -v grep | grep "$user" | wc -l)
 
-        if xray api statsquery --pattern "user>>>$user>>>online" >/dev/null 2>&1; then
-            connections=$(xray api statsquery --pattern "user>>>$user>>>online" 2>/dev/null | grep -o '[0-9]*$')
-            [[ ! "$connections" =~ ^[0-9]+$ ]] && connections=0
+        # --- 2. CONTAGEM XRAY (Via Log de IPs únicos nos últimos 2 minutos) ---
+        con_xray=0
+        if [ -f "$XRAY_LOG" ]; then
+            # Extrai IPs únicos que acessaram com o email do usuário
+            con_xray=$(grep "$user" "$XRAY_LOG" | tail -n 50 | awk '{print $3}' | cut -d: -f1 | sort -u | grep -v "^$" | wc -l)
         fi
 
-        # -------------------------------
-        # IPs (LOG REAL)
-        # -------------------------------
-        total_ips=0
+        # Total de conexões detectadas
+        total_cons=$((con_ssh + con_xray))
 
-        if [ -f "$LOG" ]; then
-            ips=$(grep "$user" "$LOG" 2>/dev/null | tail -n 100 | awk '{print $3}' | cut -d: -f1 | sort | uniq)
-            total_ips=$(echo "$ips" | grep -c .)
-        fi
+        # --- 3. VERIFICAÇÃO DE LIMITE ---
+        if [ "$total_cons" -gt "$limit" ]; then
+            NOW=$(date +"%d/%m/%Y %H:%M:%S")
+            echo -e "${RED}[$NOW] BLOQUEANDO: $user ($total_cons/$limit)${NC}"
 
-        # -------------------------------
-        # DEBUG (opcional)
-        # -------------------------------
-        echo "[$(date)] $user -> conexões=$connections | ips=$total_ips | limite=$limit"
+            # AÇÃO 1: Bloquear no Linux (SSH/SlowDNS)
+            pkill -u "$user" &>/dev/null
+            passwd -l "$user" &>/dev/null
 
-        # -------------------------------
-        # VERIFICA LIMITE
-        # -------------------------------
-        if [ "$connections" -gt "$limit" ] || [ "$total_ips" -gt "$limit" ]; then
-
-            echo -e "${RED}🚫 $user excedeu limite!${NC}"
-
-            # -------------------------------
-            # REMOVER DO XRAY
-            # -------------------------------
-            if [ -f "$CONFIG" ] && command -v jq >/dev/null; then
-
+            # AÇÃO 2: Remover do JSON do Xray
+            if [ -f "$XRAY_CONF" ] && command -v jq >/dev/null; then
                 tmp=$(mktemp)
-
-                jq --arg email "$user" '
-                .inbounds[0].settings.clients |= map(select(.email != $email))
-                ' "$CONFIG" > "$tmp"
-
-                if [ $? -eq 0 ] && [ -s "$tmp" ]; then
-                    mv "$tmp" "$CONFIG"
-                    systemctl restart xray 2>/dev/null
-                else
-                    echo -e "${RED}Erro ao atualizar config.json${NC}"
-                    rm -f "$tmp"
-                fi
-
+                jq --arg email "$user" '.inbounds[0].settings.clients |= map(select(.email != $email))' "$XRAY_CONF" > "$tmp" && mv "$tmp" "$XRAY_CONF"
+                systemctl restart xray 2>/dev/null
             fi
 
-            # -------------------------------
-            # REGISTRAR BLOQUEIO
-            # -------------------------------
-            echo "$user|$NOW" >> "$BLOCKED"
-
-            echo -e "${YELLOW}🔒 $user bloqueado${NC}"
-
+            # AÇÃO 3: Registrar no Banco de Bloqueados
+            echo "$user|$(date +%s)|$total_cons" >> "$BLOCKED_DB"
         fi
 
-    done < "$USERS"
+    done < "$USERS_DB"
 
-    sleep 20
-
+    sleep 15 # Intervalo entre verificações
 done
