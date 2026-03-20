@@ -77,7 +77,7 @@ case $op in
     5|05) bash "$BASE/online.sh" ;;
     6|06) [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo "Vazio"; read -p ".." ;;
     7|07) bash "$BASE/unblock.sh" ;;
-    10) [ -f "/etc/xray-manager/repair.sh" ] && bash "/etc/xray-manager/repair.sh" || { wget -q -O /etc/xray-manager/repair.sh https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main/repair.sh && chmod +x /etc/xray-manager/repair.sh && bash /etc/xray-manager/repair.sh; } ;;
+    10) [ -f "/etc/xray-manager/repair.sh" ] && bash "/etc/xray-manager/repair.sh" || { wget -q -O /etc/xray-manager/repair.sh https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon-2.0/main/repair.sh && chmod +x /etc/xray-manager/repair.sh && bash /etc/xray-manager/repair.sh; } ;;
     11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 & echo -e "${G}ON${NC}"; sleep 1 ;;
     12) pkill -f limit.sh; echo -e "${R}OFF${NC}"; sleep 1 ;;
     13) speedtest-cli --simple || apt install speedtest-cli -y; read -p ".." ;;
