@@ -1,106 +1,96 @@
 #!/bin/bash
 
-# ===============================
-# CONFIGURAÇÕES E CORES
-# ===============================
-BASE="/etc/painel"
-XRAY_MGR="/etc/xray-manager"
-REPO="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main"
+# ==========================================
+#   NETSIMON ENTERPRISE - INSTALADOR BASE
+# ==========================================
 
+# Cores
 GREEN='\033[1;32m'
 RED='\033[1;31m'
 CYAN='\033[1;36m'
 YELLOW='\033[1;33m'
+WHITE='\033[1;37m'
 NC='\033[0m'
 
-# Lista de arquivos que DEVEM estar no seu repositório GitHub
-FILES=(
-"menu.sh"
-"xray.sh"
-"websocket.sh"
-"slowdns-server.sh"
-"adduser.sh"
-"deluser.sh"
-"online.sh"
-"limit.sh"
-"unblock.sh"
+# URL Base do seu GitHub (Onde estão todos os scripts)
+GITHUB_URL="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main"
+
+# Lista de arquivos modulares do painel
+SCRIPTS=(
+    "menu.sh"
+    "adduser.sh"
+    "addtest.sh"
+    "deluser.sh"
+    "online.sh"
+    "limit.sh"
+    "unblock.sh"
+    "websocket.sh"
+    "xray.sh"
+    "slowdns-server.sh"
+    "monitor.sh"
+    "proxy.py"
 )
 
 clear
-echo -e "${CYAN}══════════════════════════════════════════${NC}"
-echo -e "${GREEN}    INSTALADOR NETSIMON ENTERPRISE 2.0    ${NC}"
-echo -e "${CYAN}══════════════════════════════════════════${NC}"
+echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║${WHITE}            🚀 INSTALAÇÃO NETSIMON ENTERPRISE 🚀              ${CYAN}║${NC}"
+echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${CYAN}║${NC} Preparando o sistema e baixando módulos...                   ${CYAN}║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+sleep 2
 
-# 1. ROOT CHECK
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}Erro: Execute como root!${NC}"
-    exit 1
-fi
+# 1. Atualização e Dependências
+echo -e "\n${YELLOW}[1/4] Atualizando pacotes e instalando dependências...${NC}"
+apt update -y &>/dev/null
+apt install -y wget curl jq cron net-tools bc dos2unix python3 &>/dev/null
 
-# 2. INSTALAR DEPENDÊNCIAS
-echo -e "${YELLOW}[1/5] Instalando dependências essenciais...${NC}"
-apt update -y
-apt install -y curl wget jq nginx golang bsdmainutils &>/dev/null
+# 2. Estrutura de Diretórios e Banco de Dados
+echo -e "${YELLOW}[2/4] Criando diretórios e bancos de dados...${NC}"
+mkdir -p /etc/painel
+mkdir -p /etc/xray-manager
 
-# 3. CRIAR ESTRUTURA DE PASTAS E BANCO
-echo -e "${YELLOW}[2/5] Criando estrutura de diretórios...${NC}"
-mkdir -p "$BASE"
-mkdir -p "$XRAY_MGR"
-mkdir -p "/etc/xray"
+# Cria os arquivos de banco de dados se não existirem
+touch /etc/xray-manager/users.db
+touch /etc/xray-manager/blocked.db
 
-# Criando arquivos de banco de dados se não existirem
-[ ! -f "$XRAY_MGR/users.db" ] && touch "$XRAY_MGR/users.db"
-[ ! -f "$XRAY_MGR/blocked.db" ] && touch "$XRAY_MGR/blocked.db"
+# 3. Download dos Scripts Modulares
+echo -e "${YELLOW}[3/4] Baixando módulos do GitHub...${NC}"
+cd /etc/painel || exit
 
-# 4. DOWNLOAD DOS ARQUIVOS DO GITHUB
-echo -e "${YELLOW}[3/5] Baixando scripts do repositório...${NC}"
-
-for file in "${FILES[@]}"; do
-    echo -e "  ${CYAN}下载:${NC} $file"
-    # Baixa o arquivo do GitHub sobrescrevendo o antigo
-    wget -q -O "$BASE/$file" "$REPO/$file"
-
-    if [ ! -s "$BASE/$file" ]; then
-        echo -e "${RED}Erro crítico: Falha ao baixar $file${NC}"
-        echo -e "${YELLOW}Verifique se o nome do arquivo no GitHub está correto.${NC}"
-        exit 1
+for script in "${SCRIPTS[@]}"; do
+    echo -ne "  -> Baixando ${script}... "
+    wget -q -O "$script" "$GITHUB_URL/$script"
+    
+    if [ -s "$script" ]; then
+        echo -e "${GREEN}OK${NC}"
+        # Se for script bash, converte possíveis quebras de linha do Windows e dá permissão
+        if [[ "$script" == *.sh ]]; then
+            dos2unix "$script" &>/dev/null
+            chmod +x "$script"
+        fi
+    else
+        echo -e "${RED}FALHOU (Verifique se o arquivo está no GitHub)${NC}"
     fi
-    chmod +x "$BASE/$file"
 done
 
-# 5. CONFIGURAÇÃO GLOBAL E ATALHOS
-echo -e "${YELLOW}[4/5] Configurando atalhos do sistema...${NC}"
+# Permissão especial para o script python
+chmod +x /etc/painel/proxy.py &>/dev/null
 
-# Atalho 'p' ou 'menu' para abrir o painel
-cat > "/usr/local/bin/p" <<EOF
-#!/bin/bash
-bash $BASE/menu.sh
-EOF
-chmod +x "/usr/local/bin/p"
-ln -sf /usr/local/bin/p /usr/local/bin/menu
+# 4. Criando Atalho do Menu
+echo -e "${YELLOW}[4/4] Configurando atalho do sistema...${NC}"
+echo '#!/bin/bash' > /usr/local/bin/menu
+echo 'bash /etc/painel/menu.sh' >> /usr/local/bin/menu
+chmod +x /usr/local/bin/menu
 
-# 6. CONFIGURAÇÃO INICIAL DO XRAY (Evita erro de JSON vazio)
-if [ ! -f /etc/xray/config.json ]; then
-    echo -e "${YELLOW}[5/5] Criando config base do Xray...${NC}"
-    cat > /etc/xray/config.json <<EOF
-{
-  "log": { "loglevel": "warning" },
-  "inbounds": [],
-  "outbounds": [{ "protocol": "freedom" }]
-}
-EOF
-fi
-
-# ===============================
-# FINALIZAÇÃO
-# ===============================
 clear
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
-echo -e "${GREEN}       INSTALAÇÃO CONCLUÍDA COM SUCESSO!  ${NC}"
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
-echo -e "${WHITE}Comando para abrir o painel:${NC} ${YELLOW}p${NC} ou ${YELLOW}menu${NC}"
-echo -e "${CYAN}Diretório dos scripts:${NC} $BASE"
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
-
-read -p "Deseja abrir o painel agora? (s/n): " abrir
-[[ "$abrir" == "s" || "$abrir" == "S" ]] && bash "$BASE/menu.sh"
+echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║${WHITE}             ✅ INSTALAÇÃO CONCLUÍDA COM SUCESSO!             ${CYAN}║${NC}"
+echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${CYAN}║${NC} Para acessar o painel, digite em qualquer lugar:             ${CYAN}║${NC}"
+echo -e "${CYAN}║${GREEN} menu                                                         ${CYAN}║${NC}"
+echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${CYAN}║${YELLOW} PRÓXIMOS PASSOS:${NC}                                             ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC} 1. Digite 'menu'                                             ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC} 2. Vá na opção 16 para instalar o Xray (VLESS)               ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC} 3. Vá na opção 14 para ligar o WebSocket (se precisar)       ${CYAN}║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
