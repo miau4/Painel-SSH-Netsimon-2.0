@@ -7,18 +7,19 @@ XRAY_CONF="/etc/xray/config.json"
 # Cores
 G='\033[1;32m'; R='\033[1;31m'; C='\033[1;36m'; Y='\033[1;33m'; W='\033[1;37m'; NC='\033[0m'
 
-# Funções de Status Blindadas
+# Funções de Status
 get_cpu() { top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}'; }
 get_ram() { free | awk '/Mem:/ {printf("%d"), $3/$2 * 100}'; }
 get_disk() { df / | awk 'NR==2 {print $5}' | sed 's/%//'; }
 get_total() { [ -f "$USERDB" ] && wc -l < "$USERDB" || echo 0; }
 get_online() { ps aux | grep -i sshd | grep -v root | grep -v grep | wc -l; }
+get_blocked() { [ -f "$BLOCKED" ] && wc -l < "$BLOCKED" || echo 0; }
 
 status_serv() { 
     if systemctl list-unit-files | grep -q "$1.service"; then
         systemctl is-active --quiet "$1" && echo -e "${G}ON ${NC}" || echo -e "${R}OFF${NC}"
     else
-        echo -e "${Y}-- ${NC}" # Serviço não instalado ainda
+        echo -e "${Y}-- ${NC}"
     fi
 }
 
@@ -35,9 +36,8 @@ clear
 CPU=$(get_cpu); RAM=$(get_ram); DISK=$(get_disk)
 IP=$(curl -s --connect-timeout 2 ifconfig.me || echo "0.0.0.0")
 
-# Detecção segura de Porta Xray
 if [ -f "$XRAY_CONF" ]; then
-    XP=$(grep '"port"' "$XRAY_CONF" | head -n1 | awk '{print $2}' | sed 's/,//g')
+    XP=$(grep '"port"' "$XRAY_CONF" | head -n 1 | awk '{print $2}' | sed 's/,//g')
     [ -z "$XP" ] && XP="N/A"
 else
     XP="--"
@@ -46,7 +46,7 @@ fi
 echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${C}║${W}               🚀 NETSIMON ENTERPRISE PANEL 🚀                ${C}║${NC}"
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
-printf "${C}║${NC} Users: %-10s Online: %-10s Blocked: %-9s ${C}║\n" "$(get_total)" "$(get_online)" "$(get_total)"
+printf "${C}║${NC} Users: %-10s Online: %-10s Blocked: %-9s ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
 printf "${C}║${NC} IP: %-15s Xray Port: %-8s Limiter: %-10s ${C}║\n" "$IP" "$XP" "$(pgrep -f limit.sh >/dev/null && echo -e "${G}ON${NC}" || echo -e "${R}OFF${NC}")"
 printf "${C}║${NC} CPU  %-51s ${C}║\n" "$(bar $CPU)"
 printf "${C}║${NC} RAM  %-51s ${C}║\n" "$(bar $RAM)"
@@ -73,7 +73,7 @@ case $op in
     5|05) bash "$BASE/online.sh" ;;
     6|06) [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo "Vazio"; read -p ".." ;;
     7|07) bash "$BASE/unblock.sh" ;;
-    10) wget -q -O /tmp/i.sh "$GITHUB_URL/install.sh" && bash /tmp/i.sh ;;
+    10) wget -q -O /tmp/i.sh "https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main/install.sh" && bash /tmp/i.sh ;;
     11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 & ; echo "ON"; sleep 1 ;;
     12) pkill -f limit.sh; echo "OFF"; sleep 1 ;;
     13) speedtest-cli --simple || apt install speedtest-cli -y; read -p ".." ;;
