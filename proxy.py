@@ -1,9 +1,21 @@
-import socket, threading, sys
+import socket
+import threading
+import sys
 
-def handle_client(client_socket, target_host, target_port):
+# Configurações Padrão
+LISTENING_ADDR = '0.0.0.0'
+TARGET_ADDR = '127.0.0.1'
+TARGET_PORT = 22 # Porta do SSH Local
+
+# Cores para o Log (Apenas se rodar manualmente)
+G = '\033[1;32m'
+R = '\033[1;31m'
+NC = '\033[0m'
+
+def handler(client_socket, target_addr, target_port):
     try:
         target_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        target_socket.connect((target_host, target_port))
+        target_socket.connect((target_addr, target_port))
     except Exception as e:
         client_socket.close()
         return
@@ -12,9 +24,11 @@ def handle_client(client_socket, target_host, target_port):
         try:
             while True:
                 data = source.recv(4096)
-                if not data: break
+                if not data:
+                    break
                 destination.sendall(data)
-        except: pass
+        except:
+            pass
         finally:
             source.close()
             destination.close()
@@ -23,34 +37,30 @@ def handle_client(client_socket, target_host, target_port):
     threading.Thread(target=forward, args=(target_socket, client_socket)).start()
 
 def main():
-    if len(sys.argv) < 2:
-        print("Uso: python3 proxy.py <porta>")
-        sys.exit(1)
+    # Verifica se uma porta foi passada como argumento
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            print(f"{R}Erro: Porta inválida.{NC}")
+            sys.exit(1)
+    else:
+        port = 80 # Porta padrão caso não informe nada
 
-    listen_port = int(sys.argv[1])
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
     try:
-        server.bind(('0.0.0.0', listen_port))
+        server.bind((LISTENING_ADDR, port))
         server.listen(100)
-        print(f"[*] WebSocket Proxy rodando na porta {listen_port}")
+        print(f"{G}[+] WebSocket Rodando na Porta: {port}{NC}")
     except Exception as e:
-        print(f"[!] Erro ao abrir porta {listen_port}: {e}")
+        print(f"{R}Erro ao iniciar na porta {port}: {e}{NC}")
         sys.exit(1)
 
     while True:
-        client, addr = server.accept()
-        # Handshake simples para aceitar a conexão
-        try:
-            data = client.recv(1024).decode('utf-8', errors='ignore')
-            if "Upgrade: websocket" in data or "CONNECT" in data:
-                client.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
-                handle_client(client, '127.0.0.1', 22)
-            else:
-                client.close()
-        except:
-            client.close()
+        client_sock, addr = server.accept()
+        threading.Thread(target=handler, args=(client_sock, TARGET_ADDR, TARGET_PORT)).start()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
