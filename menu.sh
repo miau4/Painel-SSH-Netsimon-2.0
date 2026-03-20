@@ -1,12 +1,12 @@
 #!/bin/bash
 # ==========================================
-#   NETSIMON ENTERPRISE - MENU PRINCIPAL 2.0
+#    NETSIMON ENTERPRISE - MENU PRINCIPAL 2.0
 # ==========================================
 
 BASE="/etc/painel"
 USERDB="/etc/xray-manager/users.db"
 BLOCKED="/etc/xray-manager/blocked.db"
-XRAY_CONF="/etc/xray/config.json"
+XRAY_CONF="/usr/local/etc/xray/config.json"
 REPO_URL="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon-2.0/main"
 
 # Cores
@@ -32,10 +32,14 @@ bar() {
 while true; do
 clear
 CPU=$(get_cpu); RAM=$(get_ram); DISK=$(get_disk)
-IP=$(curl -s --connect-timeout 2 ifconfig.me || echo "0.0.0.0")
 
+# Captura de IP Limpa (Plain Text)
+IP=$(wget -qO- ipv4.icanhazip.com || wget -qO- ifconfig.me/ip || echo "0.0.0.0")
+IP=$(echo $IP | tr -d '[:space:]')
+
+# Detecção de Portas Xray (Suporta múltiplas portas como 80, 8080)
 if [ -f "$XRAY_CONF" ]; then
-    XP=$(grep '"port"' "$XRAY_CONF" | head -n 1 | awk '{print $2}' | sed 's/,//g')
+    XP=$(jq -r '.inbounds[].port' "$XRAY_CONF" | xargs | sed 's/ /,/g')
     [ -z "$XP" ] && XP="N/A"
 else
     XP="--"
@@ -47,7 +51,7 @@ echo -e "${C}╔═════════════════════�
 echo -e "${C}║${W}                🚀 NETSIMON ENTERPRISE PANEL 🚀               ${C}║${NC}"
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
 
-# Estatísticas alinhadas
+# Estatísticas alinhadas (Mantendo o layout original)
 printf "${C}║${NC}  Users: %-9s | Online: %-9s | Blocked: %-10s  ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
 printf "${C}║${NC}  IP: %-15s | Port: %-10s | Limiter: %-10s  ${C}║\n" "$IP" "$XP" "$LMT_STAT"
 
@@ -61,16 +65,16 @@ printf "${C}║${NC}  DISK %-55s ${C}║\n" "$(bar $DISK)"
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
 
 # Opções do Painel
-printf "${C}║${W} 01) Criar Usuário          ${C}│${W} 11) Ativar Limiter           ${C}║\n"
-printf "${C}║${W} 02) Criar Teste            ${C}│${W} 12) Parar Limiter            ${C}║\n"
-printf "${C}║${W} 03) Remover Usuário        ${C}│${W} 13) Teste Velocidade         ${C}║\n"
-printf "${C}║${W} 04) Listar Usuários        ${C}│${W} 14) WebSocket Manager        ${C}║\n"
-printf "${C}║${W} 05) Usuários Online        ${C}│${W} 15) SlowDNS Manager          ${C}║\n"
-printf "${C}║${W} 06) Ver Bloqueados         ${C}│${W} 16) Xray Manager             ${C}║\n"
-printf "${C}║${W} 07) Desbloquear Usuário    ${C}│${W} 17) Monitor Tempo Real       ${C}║\n"
-printf "${C}║${W} 08) Limpar Bloqueios       ${C}│${W} 18) Ver Logs                 ${C}║\n"
-printf "${C}║${W} 09) Reiniciar Xray         ${C}│${W} 19) Backup Config            ${C}║\n"
-printf "${C}║${W} 10) Reparar Sistema        ${C}│${W} 00) Sair                     ${C}║\n"
+printf "${C}║${W} 01) Criar Usuário           ${C}│${W} 11) Ativar Limiter           ${C}║\n"
+printf "${C}║${W} 02) Criar Teste             ${C}│${W} 12) Parar Limiter            ${C}║\n"
+printf "${C}║${W} 03) Remover Usuário         ${C}│${W} 13) Teste Velocidade         ${C}║\n"
+printf "${C}║${W} 04) Listar Usuários         ${C}│${W} 14) WebSocket Manager        ${C}║\n"
+printf "${C}║${W} 05) Usuários Online         ${C}│${W} 15) SlowDNS Manager          ${C}║\n"
+printf "${C}║${W} 06) Ver Bloqueados          ${C}│${W} 16) Xray Manager             ${C}║\n"
+printf "${C}║${W} 07) Desbloquear Usuário     ${C}│${W} 17) Monitor Tempo Real       ${C}║\n"
+printf "${C}║${W} 08) Limpar Bloqueios        ${C}│${W} 18) Ver Logs                 ${C}║\n"
+printf "${C}║${W} 09) Reiniciar Xray          ${C}│${W} 19) Backup Config            ${C}║\n"
+printf "${C}║${W} 10) Reparar Sistema         ${C}│${W} 00) Sair                     ${C}║\n"
 echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo -ne "${Y}Escolha uma opção: ${NC}"; read op
 
