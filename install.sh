@@ -2,7 +2,7 @@
 # NETSIMON ENTERPRISE - INSTALADOR BASE
 # Autor: Gemini para NetSimon
 
-GITHUB_URL="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main"
+GITHUB_URL="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon-2.0/main"
 
 # Cores
 C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'; W='\033[1;37m'; NC='\033[0m'
