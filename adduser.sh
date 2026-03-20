@@ -1,81 +1,75 @@
 #!/bin/bash
+# NETSIMON ENTERPRISE - PROVISÃO HÍBRIDA (SSH + XRAY)
 
-# Caminhos Sincronizados
-USERS_DB="/etc/xray-manager/users.db"
-CONFIG_XRAY="/etc/xray/config.json"
+USERDB="/etc/xray-manager/users.db"
+XRAY_CONF="/etc/xray/config.json"
 
 # Cores
-GREEN='\033[1;32m'
-RED='\033[1;31m'
-CYAN='\033[1;36m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; W='\033[1;37m'; NC='\033[0m'
 
 clear
-echo -e "${CYAN}══════════════════════════════════════════${NC}"
-echo -e "${GREEN}          ➕ CRIAR USUÁRIO SSH/VLESS       ${NC}"
-echo -e "${CYAN}══════════════════════════════════════════${NC}"
+echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${C}║${W}               👤 CRIAR NOVO USUÁRIO (HÍBRIDO)                ${C}║${NC}"
+echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
 
-# ----------------- INPUTS -----------------
-read -p "Nome do usuário: " user
-[[ -z "$user" ]] && echo -e "${RED}Nome vazio!${NC}" && sleep 2 && exit
+# 1. Coleta de Dados
+read -p " Nome do Usuário: " user
+[[ -z "$user" ]] && { echo -e "${R}Erro: Nome obrigatório!${NC}"; sleep 2; exit 1; }
 
 # Verifica se já existe
-if grep -q "^$user|" "$USERS_DB" || id "$user" &>/dev/null; then
-    echo -e "${RED}Usuário já existe!${NC}"
-    sleep 2 && exit
+if id "$user" &>/dev/null || grep -q "^$user|" "$USERDB"; then
+    echo -e "${R}Erro: O usuário '$user' já existe no sistema!${NC}"
+    read -p "Pressione ENTER..."
+    exit 1
 fi
 
-read -p "Senha para SSH/SlowDNS: " pass
+read -p " Senha (SSH): " pass
 [[ -z "$pass" ]] && pass="1234"
 
-read -p "Dias de validade: " dias
-[[ ! "$dias" =~ ^[0-9]+$ ]] && dias=30
+read -p " Dias de Validade (Ex: 30): " dias
+[[ -z "$dias" ]] && dias=30
 
-read -p "Limite de IPs: " limit
-[[ ! "$limit" =~ ^[0-9]+$ ]] && limit=1
+read -p " Limite de Conexões (Ex: 1): " limite
+[[ -z "$limite" ]] && limite=1
 
-# ----------------- GERAR DADOS -----------------
-uuid=$(cat /proc/sys/kernel/random/uuid)
+# 2. Cálculos e IDs
 exp_date=$(date -d "+$dias days" +"%Y-%m-%d")
+uuid=$(cat /proc/sys/kernel/random/uuid)
 
-# ----------------- CRIAÇÃO NO SISTEMA (SSH/SLOWDNS) -----------------
-# Cria o usuário no Linux sem diretório home e com shell falso por segurança
-useradd -M -s /bin/false -e "$exp_date" "$user"
-echo "$user:$pass" | chpasswd
+echo -e "\n${Y}[+] Criando conta no sistema...${NC}"
 
-# ----------------- SALVAR NO BANCO -----------------
-echo "$user|$uuid|$exp_date|$pass|$limit" >> "$USERS_DB"
+# 3. Criar no Linux (SSH)
+useradd -M -s /bin/false -p $(openssl passwd -1 "$pass") "$user"
 
-# ----------------- INSERIR NO XRAY (JQ) -----------------
-if [ -f "$CONFIG_XRAY" ]; then
+# 4. Injetar no Xray (Se o config.json existir)
+if [ -f "$XRAY_CONF" ]; then
+    echo -e "${Y}[+] Sincronizando com Xray Core...${NC}"
+    # Usa jq para adicionar o cliente ao array de clients do primeiro inbound
     tmp=$(mktemp)
-    # Esta lógica garante que se o array de clients não existir, ele cria um
-    jq --arg uuid "$uuid" --arg user "$user" '
-        ( .inbounds[0].settings.clients // [] ) as $clients 
-        | .inbounds[0].settings.clients = ($clients + [{"id": $uuid, "email": $user}])
-    ' "$CONFIG_XRAY" > "$tmp" && mv "$tmp" "$CONFIG_XRAY"
-    systemctl restart xray 2>/dev/null
+    jq --arg u "$user" --arg id "$uuid" '.inbounds[0].settings.clients += [{"id": $id, "alterId": 0, "email": $u}]' "$XRAY_CONF" > "$tmp" && mv "$tmp" "$XRAY_CONF"
+    systemctl restart xray
 fi
 
-# ----------------- RESULTADO FINAL -----------------
-IP=$(curl -s ifconfig.me)
+# 5. Salvar no Banco de Dados Central
+echo "$user|$uuid|$exp_date|$pass|$limite" >> "$USERDB"
+
+# 6. Relatório de Entrega (O que você manda pro cliente)
 clear
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
-echo -e "${GREEN}           ✅ USUÁRIO CRIADO               ${NC}"
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
-echo -e "${CYAN}Usuário :${NC} $user"
-echo -e "${CYAN}Senha   :${NC} $pass"
-echo -e "${CYAN}UUID    :${NC} $uuid"
-echo -e "${CYAN}Expira  :${NC} $exp_date"
-echo -e "${CYAN}Limite  :${NC} $limit IP(s)"
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
+echo -e "${G}✅ USUÁRIO CRIADO COM SUCESSO!${NC}"
+echo -e "${C}══════════════════════════════════════════════════════════════${NC}"
+echo -e "${W}  DADOS SSH / WEBSOCKET${NC}"
+echo -e "  Usuário: ${Y}$user${NC}"
+echo -e "  Senha:   ${Y}$pass${NC}"
+echo -e "  Limite:  ${Y}$limite dispositivo(s)${NC}"
+echo -e "${C}--------------------------------------------------------------${NC}"
+echo -e "${W}  DADOS VLESS / XRAY${NC}"
+echo -e "  UUID:    ${Y}$uuid${NC}"
+echo -e "  Path:    ${Y}/${NC}"
+echo -e "  Network: ${Y}xhttp / TLS${NC}"
+echo -e "${C}--------------------------------------------------------------${NC}"
+echo -e "  Validade: ${G}$exp_date ($dias dias)${NC}"
+echo -e "${C}══════════════════════════════════════════════════════════════${NC}"
 
-echo -e "\n${YELLOW}LINK VLESS-WS:${NC}"
-echo "vless://$uuid@$IP:443?path=/ws&security=none&encryption=none&type=ws#$user"
-
-echo -e "\n${YELLOW}DADOS SSH/SLOWDNS:${NC}"
-echo "IP: $IP | Porta: 22, 80 | User: $user | Senha: $pass"
-echo -e "${GREEN}══════════════════════════════════════════${NC}"
-
-read -n1 -r -p "Pressione qualquer tecla para voltar..."
+# Dica de monitoramento
+echo -e "${Y}Dica:${NC} O limitador já está rastreando este usuário."
+read -p "Pressione ENTER para voltar ao menu..."
