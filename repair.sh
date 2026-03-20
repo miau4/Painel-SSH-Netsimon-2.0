@@ -4,7 +4,6 @@
 # ==========================================
 
 BASE="/etc/painel"
-# Atualizado para o repositório 2.0 para bater com seu menu e instalador
 REPO="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon-2.0/main"
 
 # Cores
@@ -40,21 +39,26 @@ arquivos=(
 echo -e "${Y}[!] Iniciando recuperação de módulos do GitHub...${NC}\n"
 
 for file in "${arquivos[@]}"; do
-    # Ajustado o printf para alinhar corretamente as colunas
-    printf "${W}[+] Verificando: ${Y}%-18s${NC}" "$file"
+    # O uso do printf aqui garante o alinhamento das colunas sem imprimir o código da máscara
+    printf "${W}[+] Verificando: ${Y}%-20s${NC}" "$file"
     
-    # Download silencioso com timeout
-    wget -q --timeout=10 -O "$BASE/$file" "$REPO/$file"
+    # Remove arquivo antigo antes de baixar o novo para evitar conflitos
+    rm -f "$BASE/$file"
     
-    # Verifica se o arquivo existe e não está vazio após o download
-    if [ -s "$BASE/$file" ]; then
+    # Download silencioso com timeout e tentativas
+    wget -q --timeout=10 --tries=3 -O "$BASE/$file" "$REPO/$file"
+    
+    # Verifica se o download foi bem sucedido e se o arquivo tem conteúdo
+    if [[ -s "$BASE/$file" ]]; then
         chmod +x "$BASE/$file"
-        # Converte para o formato Unix caso tenha sido editado no Windows
-        dos2unix "$BASE/$file" &>/dev/null
+        # Converte para Unix para evitar quebras de linha do Windows
+        if command -v dos2unix &>/dev/null; then
+            dos2unix "$BASE/$file" &>/dev/null
+        fi
         echo -e "${G}[ ATUALIZADO ]${NC}"
         
-        # Sincroniza o reparador com o diretório que o menu acessa
-        if [ "$file" == "repair.sh" ]; then
+        # Sincroniza o reparador com o local de backup
+        if [[ "$file" == "repair.sh" ]]; then
             cp "$BASE/$file" "/etc/xray-manager/repair.sh"
             chmod +x "/etc/xray-manager/repair.sh"
         fi
@@ -63,24 +67,18 @@ for file in "${arquivos[@]}"; do
     fi
 done
 
-# 3. Restaurar Atalhos de Sistema (Correção de Shell Level)
+# 3. Restaurar Atalhos de Sistema (Prevenção de Loop de Shell)
 echo -ne "\n${W}[+] Restaurando atalho 'menu'... ${NC}"
-# Criando atalho robusto para evitar loops de shell
+rm -f /usr/local/bin/menu
 echo '#!/bin/bash
 bash /etc/painel/menu.sh' > /usr/local/bin/menu
 chmod +x /usr/local/bin/menu
 echo -e "${G}OK${NC}"
 
-# 4. Verificar dependências essenciais
-if ! command -v python3 &>/dev/null; then
-    echo -ne "${W}[+] Instalando Python3... ${NC}"
-    apt install python3 -y &>/dev/null
-    echo -e "${G}OK${NC}"
-fi
-
-if ! command -v dos2unix &>/dev/null; then
-    apt install dos2unix -y &>/dev/null
-fi
+# 4. Verificação final de dependências
+echo -ne "${W}[+] Verificando Python3 e ferramentas... ${NC}"
+apt install python3 dos2unix -y &>/dev/null
+echo -e "${G}OK${NC}"
 
 echo -e "\n${C}══════════════════════════════════════════════════════════════${NC}"
 echo -e "${G}✅ SISTEMA REPARADO COM SUCESSO!${NC}"
