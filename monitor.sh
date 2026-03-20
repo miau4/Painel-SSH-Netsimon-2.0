@@ -1,22 +1,18 @@
+cat << 'EOF' > /etc/painel/monitor.sh
 #!/bin/bash
-# Cores para o watch -c
-G='\e[32m'; R='\e[31m'; C='\e[36m'; Y='\e[33m'; N='\e[0m'
+# MONITOR DE RECURSOS NETSIMON
+G='\033[1;32m'; R='\033[1;31m'; C='\033[1;36m'; W='\033[1;37m'; NC='\033[0m'
 
-echo -e "${C}══════════════ MONITOR DE SERVIÇOS ══════════════${N}"
-printf "${Y}%-15s | %-10s | %-10s${N}\n" "SERVIÇO" "STATUS" "PORTAS"
-echo -e "-------------------------------------------------"
+clear
+echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${C}║${W}            📊 MONITOR DE RECURSOS EM TEMPO REAL             ${C}║${NC}"
+echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
 
-# Verificação Individual
-SSH_P=$(netstat -tlpn | grep sshd | awk '{print $4}' | cut -d: -f2 | xargs)
-echo -e "$(printf "%-15s | %-16s | %-10s" "SSH/SlowDNS" "$([ -n "$SSH_P" ] && echo -e "${G}ON${N}" || echo -e "${R}OFF${N}")" "${SSH_P:-22}")"
-
-XRAY_P=$(grep '"port"' /etc/xray/config.json 2>/dev/null | awk '{print $2}' | sed 's/,//g')
-echo -e "$(printf "%-15s | %-16s | %-10s" "Xray Vless" "$(systemctl is-active --quiet xray && echo -e "${G}ON${N}" || echo -e "${R}OFF${N}")" "${XRAY_P:-N/A}")"
-
-WS_P=$(netstat -tlpn | grep python | awk '{print $4}' | cut -d: -f2 | xargs)
-echo -e "$(printf "%-15s | %-16s | %-10s" "WebSocket" "$([ -n "$WS_P" ] && echo -e "${G}ON${N}" || echo -e "${R}OFF${N}")" "${WS_P:-N/A}")"
-
-DNS_P=$(pgrep -f dnstt-server >/dev/null && echo -e "${G}ON${N}" || echo -e "${R}OFF${N}")
-echo -e "$(printf "%-15s | %-16s | %-10s" "SlowDNS" "$DNS_P" "53")"
-echo -e "-------------------------------------------------"
-bash /etc/painel/online.sh | tail -n +5 # Mostra o online embaixo
+echo -e "${W}CPU:${NC} $(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}')%"
+echo -e "${W}MEMÓRIA:${NC} $(free -h | awk '/Mem:/ {print $3 "/" $2}')"
+echo -e "${W}CONEXÕES SSH:${NC} $(ss -tnp | grep ":22" | grep "ESTAB" | wc -l)"
+echo -e "${W}CONEXÕES XRAY:${NC} $(ss -tnp | grep -E ":443|:80" | grep "xray" | wc -l 2>/dev/null || echo 0)"
+echo -e "${C}══════════════════════════════════════════════════════════════${NC}"
+echo -e "${Y}Pressione CTRL+C para sair do monitor.${NC}"
+EOF
+chmod +x /etc/painel/monitor.sh
