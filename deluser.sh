@@ -8,6 +8,17 @@ LOG_LIMIT="/var/log/netsimon_limit.log"
 # Cores
 C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; W='\033[1;37m'; NC='\033[0m'
 
+# Adicione isso logo após as variáveis de cores no deluser.sh
+if [[ "$2" == "--auto" ]]; then
+    user="$1"
+    # Pula a parte de confirmação e deleta direto
+    pkill -u "$user" -f sshd &>/dev/null
+    userdel -f "$user" &>/dev/null
+    [ -f "$XRAY_CONF" ] && { tmp=$(mktemp); jq --arg u "$user" '.inbounds[0].settings.clients |= map(select(.email != $u))' "$XRAY_CONF" > "$tmp" && mv "$tmp" "$XRAY_CONF"; systemctl restart xray; }
+    sed -i "/^$user|/d" "$USERDB"
+    exit 0
+fi
+
 clear
 echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${C}║${W}               💀 REMOÇÃO DE CONTA ENTERPRISE                 ${C}║${NC}"
