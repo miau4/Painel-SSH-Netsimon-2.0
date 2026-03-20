@@ -1,117 +1,60 @@
 #!/bin/bash
 # ==========================================
-#   NETSIMON ENTERPRISE - XRAY MANAGER 2.0
+#   NETSIMON ENTERPRISE - XRAY MANAGER 2.2
 # ==========================================
 
-BASE_DIR="/etc/painel"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 SSL_DIR="/etc/xray-manager/ssl"
 C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; W='\033[1;37m'; NC='\033[0m'
 
-# Função para pegar o IP de forma limpa (sem HTML)
-get_ip() {
-    local ip=$(wget -qO- ipv4.icanhazip.com || wget -qO- ifconfig.me/ip || curl -s checkip.amazonaws.com)
-    echo "$ip" | tr -d '[:space:]'
+status_detalhado() {
+    clear
+    echo -e "${C}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${C}║${W}           DETALHES TÉCNICOS DE REDE - XRAY           ${C}║${NC}"
+    echo -e "${C}╚══════════════════════════════════════════════════════╝${NC}"
+    
+    echo -e "${W}Protocolos e Portas Ativas:${NC}"
+    # Mapeia o JSON para mostrar Porta -> Protocolo -> Path
+    jq -r '.inbounds[] | "Porta: \(.port) | Protocolo: \(.protocol) | Stream: \(.streamSettings.network)"' "$XRAY_CONF"
+    
+    echo -e "\n${W}Status do Processo:${NC}"
+    pgrep xray > /dev/null && echo -e "${G}CORE ATIVO${NC}" || echo -e "${R}CORE PARADO${NC}"
+    echo -e "${C}══════════════════════════════════════════════════════${NC}"
+    read -p "Pressione ENTER para voltar..."
 }
 
-# Função para Gerar Certificado (Essencial para Conexão VPN)
-gerar_cert() {
-    mkdir -p "$SSL_DIR"
-    local domain=$(get_ip)
-    echo -e "${Y}[!] Gerando Certificado TLS para $domain...${NC}"
-    
-    openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
-    -subj "/C=BR/ST=SP/L=SaoPaulo/O=NetSimon/CN=$domain" \
-    -keyout "$SSL_DIR/privkey.pem" -out "$SSL_DIR/fullchain.pem" &>/dev/null
-    
-    chmod -R 755 "$SSL_DIR"
-    echo -e "${G}[OK] Certificados gerados em $SSL_DIR${NC}"
-}
+gerar_config_enterprise() {
+    clear
+    echo -e "${W}Selecione a Configuração de Porta para WebSocket/VLESS:${NC}"
+    echo -e "1) Padrão Seguro (Porta 443 + Interna 1080)"
+    echo -e "2) Padrão HTTP (Portas 80 e 8080 Simultâneas)"
+    echo -e "3) Personalizada"
+    echo -ne "\nEscolha: "; read p_opt
 
-# Função para Instalar o Xray Core
-check_install() {
-    if [ ! -f "/usr/local/bin/xray" ]; then
-        echo -e "${Y}[!] Instalando Xray-Core Oficial...${NC}"
-        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install &>/dev/null
-    fi
-}
-
-# Gerar Configuração Base (VLESS + TLS)
-gerar_config() {
-    local port=$1
-    [ -z "$port" ] && port="443"
-    
-    # Garante que os certificados existam antes de criar o config
-    [ ! -f "$SSL_DIR/fullchain.pem" ] && gerar_cert
+    case $p_opt in
+        1) 
+            # Inbound 443 (Externo) redirecionando internamente se necessário
+            inbounds='{ "port": 443, "protocol": "vless", "settings": { "clients": [], "decryption": "none" }, "streamSettings": { "network": "tcp", "security": "tls", "tlsSettings": { "certificates": [{ "certificateFile": "'$SSL_DIR'/fullchain.pem", "keyFile": "'$SSL_DIR'/privkey.pem" }] } } }'
+            ;;
+        2)
+            # Inbound 80 e 8080 Simultâneos (WebSocket/HTTP)
+            inbounds='{ "port": 80, "protocol": "vless", "settings": { "clients": [], "decryption": "none" }, "streamSettings": { "network": "ws", "wsSettings": { "path": "/netsimon" } } }, 
+                      { "port": 8080, "protocol": "vless", "settings": { "clients": [], "decryption": "none" }, "streamSettings": { "network": "ws", "wsSettings": { "path": "/netsimon" } } }'
+            ;;
+        3)
+            echo -ne "Digite a porta desejada: "; read p_user
+            inbounds='{ "port": '$p_user', "protocol": "vless", "settings": { "clients": [], "decryption": "none" }, "streamSettings": { "network": "ws", "wsSettings": { "path": "/netsimon" } } }'
+            ;;
+    esac
 
     cat <<EOF > "$XRAY_CONF"
 {
     "log": { "loglevel": "warning" },
-    "inbounds": [{
-        "port": $port,
-        "protocol": "vless",
-        "settings": {
-            "clients": [],
-            "decryption": "none"
-        },
-        "streamSettings": {
-            "network": "tcp",
-            "security": "tls",
-            "tlsSettings": {
-                "certificates": [{
-                    "certificateFile": "$SSL_DIR/fullchain.pem",
-                    "keyFile": "$SSL_DIR/privkey.pem"
-                }]
-            }
-        }
-    }],
+    "inbounds": [ $inbounds ],
     "outbounds": [{ "protocol": "freedom" }]
 }
 EOF
     systemctl restart xray
+    echo -e "${G}[OK] Configuração Aplicada!${NC}"
+    sleep 2
 }
-
-# Adicionar Usuário e Gerar Link
-add_user() {
-    [ ! -f "$XRAY_CONF" ] && echo -e "${R}Erro: Xray não configurado!${NC}" && sleep 2 && return
-    
-    echo -ne "${W}Nome do Usuário: ${NC}"; read nick
-    [ -z "$nick" ] && return
-    
-    uuid=$(cat /proc/sys/kernel/random/uuid)
-    port=$(jq -r '.inbounds[0].port' "$XRAY_CONF")
-    ip=$(get_ip)
-    
-    # Adiciona ao JSON de forma segura usando JQ
-    jq ".inbounds[0].settings.clients += [{\"id\": \"$uuid\", \"email\": \"$nick\", \"level\": 0}]" "$XRAY_CONF" > "$XRAY_CONF.tmp" && mv "$XRAY_CONF.tmp" "$XRAY_CONF"
-    
-    systemctl restart xray
-    
-    clear
-    echo -e "${G}✅ USUÁRIO XRAY CRIADO!${NC}"
-    echo -e "${W}--------------------------------------------${NC}"
-    echo -e "${Y}Link para o Aplicativo (v2rayNG / Napsternet):${NC}"
-    echo -e "${C}vless://$uuid@$ip:$port?security=tls&encryption=none&type=tcp#$nick${NC}"
-    echo -e "${W}--------------------------------------------${NC}"
-    read -p "Pressione ENTER para voltar..."
-}
-
-# Menu de Controle
-clear
-echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${C}║${W}                📡 XRAY ENTERPRISE MANAGER                    ${C}║${NC}"
-echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
-echo -e " 1) Instalar/Resetar Xray Core"
-echo -e " 2) Gerar Novos Certificados SSL"
-echo -e " 3) Criar Usuário VLESS + TLS"
-echo -e " 4) Ver Logs de Conexão"
-echo -e " 0) Voltar ao Menu"
-echo -ne "\n${Y}Escolha: ${NC}"; read opt
-
-case $opt in
-    1) check_install; gerar_cert; gerar_config 443; echo -e "${G}Pronto!${NC}"; sleep 2 ;;
-    2) gerar_cert; systemctl restart xray; echo -e "${G}Certificados Atualizados!${NC}"; sleep 2 ;;
-    3) add_user ;;
-    4) journalctl -u xray --no-pager -n 50; read -p "Pressione ENTER para voltar..." ;;
-    *) exit 0 ;;
-esac
