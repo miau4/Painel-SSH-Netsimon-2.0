@@ -15,20 +15,13 @@ get_total() { [ -f "$USERDB" ] && wc -l < "$USERDB" || echo 0; }
 get_online() { ps aux | grep -i sshd | grep -v root | grep -v grep | wc -l; }
 get_blocked() { [ -f "$BLOCKED" ] && wc -l < "$BLOCKED" || echo 0; }
 
-status_serv() { 
-    if systemctl list-unit-files | grep -q "$1.service"; then
-        systemctl is-active --quiet "$1" && echo -e "${G}ON ${NC}" || echo -e "${R}OFF${NC}"
-    else
-        echo -e "${Y}-- ${NC}"
-    fi
-}
-
 bar() {
     local p=$1; local size=20; local filled=$((p * size / 100)); local empty=$((size - filled))
-    printf "["
-    for ((i=0;i<filled;i++)); do printf "#"; done
-    for ((i=0;i<empty;i++)); do printf "-"; done
-    printf "] %d%%" "$p"
+    local b="["
+    for ((i=0;i<filled;i++)); do b+="#"; done
+    for ((i=0;i<empty;i++)); do b+="-"; done
+    b+="] $p%"
+    echo "$b"
 }
 
 while true; do
@@ -43,25 +36,38 @@ else
     XP="--"
 fi
 
+LMT_STAT=$(pgrep -f limit.sh >/dev/null && echo "ON" || echo "OFF")
+LMT_COL=$([ "$LMT_STAT" == "ON" ] && echo -e "${G}" || echo -e "${R}")
+
+# Lógica de Alinhamento: O quadro tem 62 caracteres internos
 echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${C}║${W}               🚀 NETSIMON ENTERPRISE PANEL 🚀                ${C}║${NC}"
+echo -e "${C}║${W}                🚀 NETSIMON ENTERPRISE PANEL 🚀               ${C}║${NC}"
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
-printf "${C}║${NC} Users: %-10s Online: %-10s Blocked: %-9s ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
-printf "${C}║${NC} IP: %-15s Xray Port: %-8s Limiter: %-10s ${C}║\n" "$IP" "$XP" "$(pgrep -f limit.sh >/dev/null && echo -e "${G}ON${NC}" || echo -e "${R}OFF${NC}")"
-printf "${C}║${NC} CPU  %-51s ${C}║\n" "$(bar $CPU)"
-printf "${C}║${NC} RAM  %-51s ${C}║\n" "$(bar $RAM)"
-printf "${C}║${NC} DISK %-51s ${C}║\n" "$(bar $DISK)"
+
+# Linha de Stats (Uso de printf com larguras fixas para bater com os 62 espaços)
+printf "${C}║${NC}  Users: %-10s | Online: %-10s | Blocked: %-12s ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
+printf "${C}║${NC}  IP: %-16s | Port: %-11s | Limiter: %-12s ${C}║\n" "$IP" "$XP" "$LMT_STAT"
+
+echo -e "${C}╟──────────────────────────────────────────────────────────────╢${NC}"
+
+# Barras de Recursos (Alinhadas em 62 colunas)
+printf "${C}║${NC}  CPU  %-55s ${C}║\n" "$(bar $CPU)"
+printf "${C}║${NC}  RAM  %-55s ${C}║\n" "$(bar $RAM)"
+printf "${C}║${NC}  DISK %-55s ${C}║\n" "$(bar $DISK)"
+
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
-printf "${C}║${W} 01) Criar Usuário        ${C}│${W} 11) Ativar Limiter         ${C}║\n"
-printf "${C}║${W} 02) Criar Teste          ${C}│${W} 12) Parar Limiter          ${C}║\n"
-printf "${C}║${W} 03) Remover Usuário      ${C}│${W} 13) Teste Velocidade       ${C}║\n"
-printf "${C}║${W} 04) Listar Usuários      ${C}│${W} 14) WebSocket Manager      ${C}║\n"
-printf "${C}║${W} 05) Usuários Online      ${C}│${W} 15) SlowDNS Manager        ${C}║\n"
-printf "${C}║${W} 06) Ver Bloqueados       ${C}│${W} 16) Xray Manager           ${C}║\n"
-printf "${C}║${W} 07) Desbloquear Usuário  ${C}│${W} 17) Monitor Tempo Real     ${C}║\n"
-printf "${C}║${W} 08) Limpar Bloqueios     ${C}│${W} 18) Ver Logs               ${C}║\n"
-printf "${C}║${W} 09) Reiniciar Xray       ${C}│${W} 19) Backup Config          ${C}║\n"
-printf "${C}║${W} 10) Reparar Sistema      ${C}│${W} 00) Sair                   ${C}║\n"
+
+# Opções do Menu (Cada lado com 30 caracteres + 1 divisor central = 61 + 1 espaco = 62)
+printf "${C}║${W} 01) Criar Usuário          ${C}│${W} 11) Ativar Limiter           ${C}║\n"
+printf "${C}║${W} 02) Criar Teste            ${C}│${W} 12) Parar Limiter            ${C}║\n"
+printf "${C}║${W} 03) Remover Usuário        ${C}│${W} 13) Teste Velocidade         ${C}║\n"
+printf "${C}║${W} 04) Listar Usuários        ${C}│${W} 14) WebSocket Manager        ${C}║\n"
+printf "${C}║${W} 05) Usuários Online        ${C}│${W} 15) SlowDNS Manager          ${C}║\n"
+printf "${C}║${W} 06) Ver Bloqueados         ${C}│${W} 16) Xray Manager             ${C}║\n"
+printf "${C}║${W} 07) Desbloquear Usuário    ${C}│${W} 17) Monitor Tempo Real       ${C}║\n"
+printf "${C}║${W} 08) Limpar Bloqueios       ${C}│${W} 18) Ver Logs                 ${C}║\n"
+printf "${C}║${W} 09) Reiniciar Xray         ${C}│${W} 19) Backup Config            ${C}║\n"
+printf "${C}║${W} 10) Reparar Sistema        ${C}│${W} 00) Sair                     ${C}║\n"
 echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo -ne "${Y}Escolha: ${NC}"; read op
 
@@ -74,8 +80,8 @@ case $op in
     6|06) [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo "Vazio"; read -p ".." ;;
     7|07) bash "$BASE/unblock.sh" ;;
     10) wget -q -O /tmp/i.sh "https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main/install.sh" && bash /tmp/i.sh ;;
-    11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 & ; echo "ON"; sleep 1 ;;
-    12) pkill -f limit.sh; echo "OFF"; sleep 1 ;;
+    11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 & ; echo -e "${G}ON${NC}"; sleep 1 ;;
+    12) pkill -f limit.sh; echo -e "${R}OFF${NC}"; sleep 1 ;;
     13) speedtest-cli --simple || apt install speedtest-cli -y; read -p ".." ;;
     14) bash "$BASE/websocket.sh" ;;
     15) bash "$BASE/slowdns-server.sh" ;;
