@@ -37,27 +37,25 @@ else
 fi
 
 LMT_STAT=$(pgrep -f limit.sh >/dev/null && echo "ON" || echo "OFF")
-LMT_COL=$([ "$LMT_STAT" == "ON" ] && echo -e "${G}" || echo -e "${R}")
 
-# Lógica de Alinhamento: O quadro tem 62 caracteres internos
 echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${C}║${W}                🚀 NETSIMON ENTERPRISE PANEL 🚀               ${C}║${NC}"
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
 
-# Linha de Stats (Uso de printf com larguras fixas para bater com os 62 espaços)
-printf "${C}║${NC}  Users: %-10s | Online: %-10s | Blocked: %-12s ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
-printf "${C}║${NC}  IP: %-16s | Port: %-11s | Limiter: %-12s ${C}║\n" "$IP" "$XP" "$LMT_STAT"
+# Linha de Stats (62 caracteres de largura)
+printf "${C}║${NC}  Users: %-9s | Online: %-9s | Blocked: %-10s  ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
+printf "${C}║${NC}  IP: %-15s | Port: %-10s | Limiter: %-10s  ${C}║\n" "$IP" "$XP" "$LMT_STAT"
 
 echo -e "${C}╟──────────────────────────────────────────────────────────────╢${NC}"
 
-# Barras de Recursos (Alinhadas em 62 colunas)
+# Barras de Recursos
 printf "${C}║${NC}  CPU  %-55s ${C}║\n" "$(bar $CPU)"
 printf "${C}║${NC}  RAM  %-55s ${C}║\n" "$(bar $RAM)"
 printf "${C}║${NC}  DISK %-55s ${C}║\n" "$(bar $DISK)"
 
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
 
-# Opções do Menu (Cada lado com 30 caracteres + 1 divisor central = 61 + 1 espaco = 62)
+# Opções do Menu (Centralizadas)
 printf "${C}║${W} 01) Criar Usuário          ${C}│${W} 11) Ativar Limiter           ${C}║\n"
 printf "${C}║${W} 02) Criar Teste            ${C}│${W} 12) Parar Limiter            ${C}║\n"
 printf "${C}║${W} 03) Remover Usuário        ${C}│${W} 13) Teste Velocidade         ${C}║\n"
@@ -79,14 +77,14 @@ case $op in
     5|05) bash "$BASE/online.sh" ;;
     6|06) [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo "Vazio"; read -p ".." ;;
     7|07) bash "$BASE/unblock.sh" ;;
-    10) wget -q -O /tmp/i.sh "https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main/install.sh" && bash /tmp/i.sh ;;
-    11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 & ; echo -e "${G}ON${NC}"; sleep 1 ;;
+    10) [ -f "/etc/xray-manager/repair.sh" ] && bash "/etc/xray-manager/repair.sh" || { wget -q -O /etc/xray-manager/repair.sh https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon/main/repair.sh && chmod +x /etc/xray-manager/repair.sh && bash /etc/xray-manager/repair.sh; } ;;
+    11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 & echo -e "${G}ON${NC}"; sleep 1 ;;
     12) pkill -f limit.sh; echo -e "${R}OFF${NC}"; sleep 1 ;;
     13) speedtest-cli --simple || apt install speedtest-cli -y; read -p ".." ;;
     14) bash "$BASE/websocket.sh" ;;
     15) bash "$BASE/slowdns-server.sh" ;;
     16) bash "$BASE/xray.sh" ;;
-    17) watch -n 2 -c "bash $BASE/monitor.sh" ;;
+    17) bash "$BASE/monitor.sh" ;;
     18) [ -f /var/log/xray/access.log ] && tail -n 50 /var/log/xray/access.log || echo "Sem logs."; read -p ".." ;;
     0|00) exit 0 ;;
     *) sleep 1 ;;
