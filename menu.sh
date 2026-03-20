@@ -32,11 +32,14 @@ bar() {
 while true; do
 clear
 CPU=$(get_cpu); RAM=$(get_ram); DISK=$(get_disk)
+
+# Correção na captura de IP para evitar espaços ou lixo
 IP=$(wget -qO- ipv4.icanhazip.com || wget -qO- ifconfig.me/ip || echo "0.0.0.0")
 IP=$(echo $IP | tr -d '[:space:]')
 
+# Correção na detecção de portas para o padrão XHTTP/TLS (Porta 443)
 if [ -f "$XRAY_CONF" ]; then
-    XP=$(jq -r '.inbounds[].port' "$XRAY_CONF" | xargs | sed 's/ /,/g')
+    XP=$(jq -r '.inbounds[].port' "$XRAY_CONF" 2>/dev/null | xargs | sed 's/ /,/g')
     [ -z "$XP" ] && XP="N/A"
 else
     XP="--"
@@ -80,12 +83,14 @@ case $op in
     10) bash "$BASE/repair.sh" ;;
     11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 &; echo -e "${G}Limiter ON!${NC}"; sleep 1 ;;
     12) pkill -f limit.sh; echo -e "${R}Limiter OFF!${NC}"; sleep 1 ;;
-    13) speedtest-cli --simple; read -p ".." ;;
+    13) speedtest-cli --simple || { echo "Instalando speedtest..."; apt install speedtest-cli -y; speedtest-cli --simple; }; read -p ".." ;;
     14) bash "$BASE/websocket.sh" ;;
     15) bash "$BASE/slowdns-server.sh" ;;
     16) bash "$BASE/xray.sh" ;;
     17) bash "$BASE/monitor.sh" ;;
     18) clear; [ -f /var/log/xray/access.log ] && tail -n 50 /var/log/xray/access.log || echo "Sem logs."; read -p "ENTER..." ;;
+    19) echo -e "${Y}Funcionalidade em desenvolvimento...${NC}"; sleep 1 ;;
     0|00) exit 0 ;;
+    *) echo -e "${R}Opção inválida!${NC}"; sleep 1 ;;
 esac
 done
