@@ -1,48 +1,42 @@
-import socket
-import threading
-import sys
+cat << 'EOF' > /etc/painel/proxy.py
+import socket, threading, thread, sys
 
 LISTENING_ADDR = '0.0.0.0'
-TARGET_ADDR = '127.0.0.1'
-TARGET_PORT = 22
-
-def handler(client_socket, target_addr, target_port):
-    try:
-        target_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        target_socket.connect((target_addr, target_port))
-    except:
-        client_socket.close()
-        return
-
-    def forward(source, destination):
-        try:
-            while True:
-                data = source.recv(4096)
-                if not data: break
-                destination.sendall(data)
-        except: pass
-        finally:
-            source.close()
-            destination.close()
-
-    threading.Thread(target=forward, args=(client_socket, target_socket)).start()
-    threading.Thread(target=forward, args=(target_socket, client_socket)).start()
+LISTENING_PORT = 80
+PASS = "NetSimon"
 
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 80
+    print "NetSimon Proxy Started on Port 80"
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
-    try:
-        server.bind((LISTENING_ADDR, port))
-        server.listen(100)
-        print(f"WS Online na porta {port}")
-    except Exception as e:
-        sys.exit(1)
-
+    server.bind((LISTENING_ADDR, LISTENING_PORT))
+    server.listen(100)
     while True:
-        client_sock, addr = server.accept()
-        threading.Thread(target=handler, args=(client_sock, TARGET_ADDR, TARGET_PORT)).start()
+        client, addr = server.accept()
+        threading.Thread(target=proxy_thread, args=(client, addr)).start()
+
+def proxy_thread(client, addr):
+    try:
+        data = client.recv(1024)
+        if "HTTP/1.1" in data:
+            target = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            target.connect(('127.0.0.1', 22))
+            client.send("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+            
+            # Bridge
+            def forward(src, dst):
+                try:
+                    while True:
+                        d = src.recv(4096)
+                        if not d: break
+                        dst.send(d)
+                except: pass
+            
+            threading.Thread(target=forward, args=(client, target)).start()
+            forward(target, client)
+    except: pass
+    finally: client.close()
 
 if __name__ == '__main__':
     main()
+EOF
