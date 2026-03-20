@@ -32,12 +32,9 @@ bar() {
 while true; do
 clear
 CPU=$(get_cpu); RAM=$(get_ram); DISK=$(get_disk)
-
-# Captura de IP Limpa (Plain Text)
 IP=$(wget -qO- ipv4.icanhazip.com || wget -qO- ifconfig.me/ip || echo "0.0.0.0")
 IP=$(echo $IP | tr -d '[:space:]')
 
-# Detecção de Portas Xray (Suporta múltiplas portas como 80, 8080)
 if [ -f "$XRAY_CONF" ]; then
     XP=$(jq -r '.inbounds[].port' "$XRAY_CONF" | xargs | sed 's/ /,/g')
     [ -z "$XP" ] && XP="N/A"
@@ -50,21 +47,13 @@ LMT_STAT=$(pgrep -f limit.sh >/dev/null && echo "ON" || echo "OFF")
 echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${C}║${W}                🚀 NETSIMON ENTERPRISE PANEL 🚀               ${C}║${NC}"
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
-
-# Estatísticas alinhadas (Mantendo o layout original)
 printf "${C}║${NC}  Users: %-9s | Online: %-9s | Blocked: %-10s  ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
 printf "${C}║${NC}  IP: %-15s | Port: %-10s | Limiter: %-10s  ${C}║\n" "$IP" "$XP" "$LMT_STAT"
-
 echo -e "${C}╟──────────────────────────────────────────────────────────────╢${NC}"
-
-# Barras de Consumo
 printf "${C}║${NC}  CPU  %-55s ${C}║\n" "$(bar $CPU)"
 printf "${C}║${NC}  RAM  %-55s ${C}║\n" "$(bar $RAM)"
 printf "${C}║${NC}  DISK %-55s ${C}║\n" "$(bar $DISK)"
-
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
-
-# Opções do Painel
 printf "${C}║${W} 01) Criar Usuário           ${C}│${W} 11) Ativar Limiter           ${C}║\n"
 printf "${C}║${W} 02) Criar Teste             ${C}│${W} 12) Parar Limiter            ${C}║\n"
 printf "${C}║${W} 03) Remover Usuário         ${C}│${W} 13) Teste Velocidade         ${C}║\n"
@@ -88,30 +77,15 @@ case $op in
     7|07) bash "$BASE/unblock.sh" ;;
     8|08) > "$BLOCKED"; echo -e "${G}Bloqueios limpos!${NC}"; sleep 1 ;;
     9|09) systemctl restart xray; echo -e "${G}Xray reiniciado!${NC}"; sleep 1 ;;
-    10) 
-        if [ -f "/etc/xray-manager/repair.sh" ]; then
-            bash "/etc/xray-manager/repair.sh"
-        else
-            echo -e "${Y}Baixando reparador...${NC}"
-            wget -q -O /etc/xray-manager/repair.sh "$REPO_URL/repair.sh"
-            chmod +x /etc/xray-manager/repair.sh
-            bash "/etc/xray-manager/repair.sh"
-        fi
-        ;;
-    11) 
-        nohup bash "$BASE/limit.sh" >/dev/null 2>&1 &
-        echo -e "${G}Limiter ativado em background!${NC}"
-        sleep 1
-        ;;
-    12) pkill -f limit.sh; echo -e "${R}Limiter parado!${NC}"; sleep 1 ;;
-    13) speedtest-cli --simple || { echo "Instalando dependência..."; apt install speedtest-cli -y; speedtest-cli --simple; }; read -p ".." ;;
+    10) bash "$BASE/repair.sh" ;;
+    11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 &; echo -e "${G}Limiter ON!${NC}"; sleep 1 ;;
+    12) pkill -f limit.sh; echo -e "${R}Limiter OFF!${NC}"; sleep 1 ;;
+    13) speedtest-cli --simple; read -p ".." ;;
     14) bash "$BASE/websocket.sh" ;;
     15) bash "$BASE/slowdns-server.sh" ;;
     16) bash "$BASE/xray.sh" ;;
     17) bash "$BASE/monitor.sh" ;;
-    18) clear; [ -f /var/log/xray/access.log ] && tail -n 50 /var/log/xray/access.log || echo "Sem logs disponíveis."; read -p "Pressione ENTER..." ;;
-    19) echo -e "${Y}Funcionalidade em desenvolvimento...${NC}"; sleep 1 ;;
-    0|00) clear; exit 0 ;;
-    *) echo -e "${R}Opção inválida!${NC}"; sleep 1 ;;
+    18) clear; [ -f /var/log/xray/access.log ] && tail -n 50 /var/log/xray/access.log || echo "Sem logs."; read -p "ENTER..." ;;
+    0|00) exit 0 ;;
 esac
 done
