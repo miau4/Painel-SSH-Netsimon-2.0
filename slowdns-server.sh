@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==========================================
 # Gerenciador SlowDNS (DNSTT) - Netsimon 2.0
-# Corrigido: Verificação de Binário e Chaves
+# Versão: Auto-Compilável (Resistente a Erros)
 # ==========================================
 
 show_status() {
@@ -12,60 +12,40 @@ show_status() {
     fi
 }
 
-view_info() {
-    clear
-    echo "========================================="
-    echo "       INFORMAÇÕES DO SLOWDNS            "
-    echo "========================================="
-    if [ -f "/etc/slowdns/pub.key" ]; then
-        PUB_KEY=$(cat /etc/slowdns/pub.key)
-        NS_DOMAIN=$(cat /etc/slowdns/domain)
-        echo -e "Status         : $(show_status)"
-        echo -e "NameServer (NS): \e[1;33m$NS_DOMAIN\e[0m"
-        echo -e "Chave Pública  : \e[1;33m$PUB_KEY\e[0m"
-    else
-        echo "O SlowDNS ainda não foi configurado corretamente."
-    fi
-    echo "========================================="
-    read -p "Pressione [Enter] para voltar..."
-}
-
 install_slowdns() {
     clear
     echo "========================================="
-    echo "   INSTALADOR SLOWDNS (DNSTT) NETSIMON   "
+    echo "   INSTALADOR SLOWDNS (COMPILADOR GO)    "
     echo "========================================="
     
     read -p "Digite seu NameServer (NS): " NS_DOMAIN
     [[ -z "$NS_DOMAIN" ]] && return
 
-    echo -e "\n[1/5] Preparando ambiente..."
+    echo -e "\n[1/5] Instalando Go e dependências (isso pode demorar...)"
     apt-get update -y -q > /dev/null 2>&1
-    apt-get install -y iptables wget coreutils > /dev/null 2>&1
+    apt-get install -y git golang-go iptables wget > /dev/null 2>&1
 
-    # Parar tudo antes de mexer
+    # Limpeza
     systemctl stop slowdns > /dev/null 2>&1
     rm -rf /etc/slowdns && mkdir -p /etc/slowdns
+    rm -rf /root/dnstt
 
-    echo "[2/5] Baixando binário universal..."
-    # Usando o binário oficial do projeto DNSTT para garantir compatibilidade
-    cd /usr/local/bin
-    rm -f dnstt-server
+    echo "[2/5] Clonando e Compilando o DNSTT (Garantindo Compatibilidade)..."
+    cd /root
+    git clone https://www.bamsoftware.com/git/dnstt.git > /dev/null 2>&1
+    cd dnstt/dnstt-server
+    go build > /dev/null 2>&1
     
-    # Tenta baixar o binário estável
-    wget -q -O dnstt-server "https://github.com/miau4/Painel-SSH-Netsimon-2.0/raw/main/dnstt-server" || \
-    wget -q -O dnstt-server "https://raw.githubusercontent.com/hidessh99/autoscript-ssh-slowdns/main/dnstt-server"
-    
-    chmod +x dnstt-server
-
-    # Verificação crítica: o binário funciona?
-    if ! ./dnstt-server -h > /dev/null 2>&1; then
-        echo -e "\e[1;31mErro Crítico: O binário dnstt-server não é compatível com sua VPS.\e[0m"
+    if [[ ! -f "dnstt-server" ]]; then
+        echo -e "\e[1;31mErro: Falha ao compilar o binário. Verifique sua conexão.\e[0m"
         read -p "Pressione Enter..."
         return
     fi
+    
+    mv dnstt-server /usr/local/bin/
+    chmod +x /usr/local/bin/dnstt-server
 
-    echo "[3/5] Gerando chaves..."
+    echo "[3/5] Gerando chaves criptográficas..."
     cd /etc/slowdns
     /usr/local/bin/dnstt-server -gen > keys.txt 2>&1
     
@@ -73,7 +53,7 @@ install_slowdns() {
     PUB_KEY=$(grep "Public key:" keys.txt | awk '{print $3}')
 
     if [[ -z "$PUB_KEY" ]]; then
-        echo -e "\e[1;31mErro: Falha ao gerar chaves. Verifique as permissões.\e[0m"
+        echo -e "\e[1;31mErro: O binário compilado falhou ao gerar chaves.\e[0m"
         read -p "Pressione Enter..."
         return
     fi
@@ -98,7 +78,9 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-    echo "[5/5] Ajustando Iptables..."
+    echo "[5/5] Configurando redirecionamento de portas..."
+    # Limpa regras velhas para não duplicar
+    iptables -t nat -F PREROUTING > /dev/null 2>&1
     iptables -t nat -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5353
     iptables -I INPUT -p udp --dport 53 -j ACCEPT
     iptables -I INPUT -p udp --dport 5353 -j ACCEPT
@@ -118,11 +100,7 @@ EOF
     read -p "Pressione [Enter] para voltar..."
 }
 
-remove_slowdns() {
-    systemctl stop slowdns && systemctl disable slowdns
-    rm -rf /etc/slowdns /etc/systemd/system/slowdns.service
-    echo "Removido."; sleep 2
-}
+# ... (restante das funções de menu iguais ao anterior)
 
 while true; do
     clear
@@ -139,8 +117,23 @@ while true; do
     read -p "Opção: " opc
     case $opc in
         1) install_slowdns ;;
-        2) view_info ;;
-        3) remove_slowdns ;;
+        2) 
+            clear
+            echo "========================================="
+            echo "       DADOS DE ACESSO SLOWDNS           "
+            echo "========================================="
+            if [ -f "/etc/slowdns/pub.key" ]; then
+                echo -e "NS: $(cat /etc/slowdns/domain)"
+                echo -e "Chave: $(cat /etc/slowdns/pub.key)"
+            else
+                echo "Não instalado."
+            fi
+            read -p "Pressione Enter..."
+            ;;
+        3) 
+            systemctl stop slowdns
+            rm -rf /etc/slowdns
+            echo "Removido."; sleep 2 ;;
         0) exit ;;
     esac
 done
