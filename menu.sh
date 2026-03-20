@@ -1,8 +1,13 @@
 #!/bin/bash
+# ==========================================
+#   NETSIMON ENTERPRISE - MENU PRINCIPAL 2.0
+# ==========================================
+
 BASE="/etc/painel"
 USERDB="/etc/xray-manager/users.db"
 BLOCKED="/etc/xray-manager/blocked.db"
 XRAY_CONF="/etc/xray/config.json"
+REPO_URL="https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon-2.0/main"
 
 # Cores
 G='\033[1;32m'; R='\033[1;31m'; C='\033[1;36m'; Y='\033[1;33m'; W='\033[1;37m'; NC='\033[0m'
@@ -42,20 +47,20 @@ echo -e "${C}╔═════════════════════�
 echo -e "${C}║${W}                🚀 NETSIMON ENTERPRISE PANEL 🚀               ${C}║${NC}"
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
 
-# Linha de Stats (62 caracteres de largura)
+# Estatísticas alinhadas
 printf "${C}║${NC}  Users: %-9s | Online: %-9s | Blocked: %-10s  ${C}║\n" "$(get_total)" "$(get_online)" "$(get_blocked)"
 printf "${C}║${NC}  IP: %-15s | Port: %-10s | Limiter: %-10s  ${C}║\n" "$IP" "$XP" "$LMT_STAT"
 
 echo -e "${C}╟──────────────────────────────────────────────────────────────╢${NC}"
 
-# Barras de Recursos
+# Barras de Consumo
 printf "${C}║${NC}  CPU  %-55s ${C}║\n" "$(bar $CPU)"
 printf "${C}║${NC}  RAM  %-55s ${C}║\n" "$(bar $RAM)"
 printf "${C}║${NC}  DISK %-55s ${C}║\n" "$(bar $DISK)"
 
 echo -e "${C}╠══════════════════════════════════════════════════════════════╣${NC}"
 
-# Opções do Menu (Centralizadas)
+# Opções do Painel
 printf "${C}║${W} 01) Criar Usuário          ${C}│${W} 11) Ativar Limiter           ${C}║\n"
 printf "${C}║${W} 02) Criar Teste            ${C}│${W} 12) Parar Limiter            ${C}║\n"
 printf "${C}║${W} 03) Remover Usuário        ${C}│${W} 13) Teste Velocidade         ${C}║\n"
@@ -67,26 +72,43 @@ printf "${C}║${W} 08) Limpar Bloqueios       ${C}│${W} 18) Ver Logs         
 printf "${C}║${W} 09) Reiniciar Xray         ${C}│${W} 19) Backup Config            ${C}║\n"
 printf "${C}║${W} 10) Reparar Sistema        ${C}│${W} 00) Sair                     ${C}║\n"
 echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
-echo -ne "${Y}Escolha: ${NC}"; read op
+echo -ne "${Y}Escolha uma opção: ${NC}"; read op
 
 case $op in
     1|01) bash "$BASE/adduser.sh" ;;
     2|02) bash "$BASE/addtest.sh" ;;
     3|03) bash "$BASE/deluser.sh" ;;
-    4|04) [ -s "$USERDB" ] && column -t -s "|" "$USERDB" || echo "Vazio"; read -p ".." ;;
+    4|04) clear; [ -s "$USERDB" ] && column -t -s "|" "$USERDB" || echo -e "${R}Banco vazio!${NC}"; echo ""; read -p "Pressione ENTER..." ;;
     5|05) bash "$BASE/online.sh" ;;
-    6|06) [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo "Vazio"; read -p ".." ;;
+    6|06) clear; [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo -e "${R}Nenhum bloqueio.${NC}"; echo ""; read -p "Pressione ENTER..." ;;
     7|07) bash "$BASE/unblock.sh" ;;
-    10) [ -f "/etc/xray-manager/repair.sh" ] && bash "/etc/xray-manager/repair.sh" || { wget -q -O /etc/xray-manager/repair.sh https://raw.githubusercontent.com/miau4/Painel-SSH-Netsimon-2.0/main/repair.sh && chmod +x /etc/xray-manager/repair.sh && bash /etc/xray-manager/repair.sh; } ;;
-    11) nohup bash "$BASE/limit.sh" >/dev/null 2>&1 & echo -e "${G}ON${NC}"; sleep 1 ;;
-    12) pkill -f limit.sh; echo -e "${R}OFF${NC}"; sleep 1 ;;
-    13) speedtest-cli --simple || apt install speedtest-cli -y; read -p ".." ;;
+    8|08) > "$BLOCKED"; echo -e "${G}Bloqueios limpos!${NC}"; sleep 1 ;;
+    9|09) systemctl restart xray; echo -e "${G}Xray reiniciado!${NC}"; sleep 1 ;;
+    10) 
+        if [ -f "/etc/xray-manager/repair.sh" ]; then
+            bash "/etc/xray-manager/repair.sh"
+        else
+            echo -e "${Y}Baixando reparador...${NC}"
+            wget -q -O /etc/xray-manager/repair.sh "$REPO_URL/repair.sh"
+            chmod +x /etc/xray-manager/repair.sh
+            bash "/etc/xray-manager/repair.sh"
+        fi
+        ;;
+    11) 
+        # Correção da sintaxe (sem o ponto e vírgula após o &)
+        nohup bash "$BASE/limit.sh" >/dev/null 2>&1 &
+        echo -e "${G}Limiter ativado em background!${NC}"
+        sleep 1
+        ;;
+    12) pkill -f limit.sh; echo -e "${R}Limiter parado!${NC}"; sleep 1 ;;
+    13) speedtest-cli --simple || { echo "Instalando dependência..."; apt install speedtest-cli -y; speedtest-cli --simple; }; read -p ".." ;;
     14) bash "$BASE/websocket.sh" ;;
     15) bash "$BASE/slowdns-server.sh" ;;
     16) bash "$BASE/xray.sh" ;;
     17) bash "$BASE/monitor.sh" ;;
-    18) [ -f /var/log/xray/access.log ] && tail -n 50 /var/log/xray/access.log || echo "Sem logs."; read -p ".." ;;
-    0|00) exit 0 ;;
-    *) sleep 1 ;;
+    18) clear; [ -f /var/log/xray/access.log ] && tail -n 50 /var/log/xray/access.log || echo "Sem logs disponíveis."; read -p "Pressione ENTER..." ;;
+    19) echo -e "${Y}Funcionalidade em desenvolvimento...${NC}"; sleep 1 ;;
+    0|00) clear; exit 0 ;;
+    *) echo -e "${R}Opção inválida!${NC}"; sleep 1 ;;
 esac
 done
