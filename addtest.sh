@@ -1,5 +1,5 @@
 #!/bin/bash
-# NETSIMON ENTERPRISE - CRIAR TESTE TEMPORÁRIO
+# NETSIMON ENTERPRISE - GERADOR DE TESTE
 BASE="/etc/painel"
 USERDB="/etc/xray-manager/users.db"
 XRAY_CONF="/etc/xray/config.json"
@@ -14,9 +14,9 @@ echo -e "${C}╚═════════════════════�
 
 read -p " Nome do Teste: " user
 [[ -z "$user" ]] && exit 1
-if id "$user" &>/dev/null; then echo -e "${R}Usuário já existe!${NC}"; sleep 2; exit 1; fi
+if id "$user" &>/dev/null; then echo -e "${R}Erro: Usuário já existe!${NC}"; sleep 2; exit 1; fi
 
-echo -e "\n${W}Escolha a duração:${NC}"
+echo -e "\n${W}Duração do teste:${NC}"
 echo -e " 1) 1 Hora"
 echo -e " 2) 2 Horas"
 echo -e " 3) 3 Horas"
@@ -29,35 +29,34 @@ case $h_opt in
     *) t_hours=1 ;;
 esac
 
-pass=$((RANDOM%9000+1000)) # Gera senha aleatória de 4 dígitos para o teste
+# Gerando Senha e UUID
+pass=$((RANDOM%9000+1000))
 uuid=$(cat /proc/sys/kernel/random/uuid)
 
-# Criação no Sistema
+# Criando no Linux com senha funcional
 useradd -M -s /bin/false "$user"
 echo "$user:$pass" | chpasswd
 
-# Adição no Xray
+# Adicionando ao Xray
 if [ -f "$XRAY_CONF" ]; then
     tmp=$(mktemp)
     jq --arg u "$user" --arg id "$uuid" '.inbounds[0].settings.clients += [{"id": $id, "alterId": 0, "email": $u}]' "$XRAY_CONF" > "$tmp" && mv "$tmp" "$XRAY_CONF"
     systemctl restart xray
 fi
 
-# Salva no Banco com marcação de expiração curta
+# Salvando no Banco de Dados
 exp=$(date -d "+$t_hours hours" +"%H:%M:%S")
 echo "$user|$uuid|Teste-$exp|$pass|1" >> "$USERDB"
 
-# AGENDAMENTO DA REMOÇÃO AUTOMÁTICA (Background)
-# Ele vai esperar o tempo em segundos e rodar o deluser.sh
+# Agendando a remoção automática em segundo plano
 (sleep $((t_hours * 3600)) && bash "$BASE/deluser.sh" "$user" --auto) &
 
 clear
-echo -e "${Y}✅ TESTE GERADO COM SUCESSO!${NC}"
+echo -e "${G}✅ TESTE CRIADO COM SUCESSO!${NC}"
 echo -e "${C}══════════════════════════════════════════════════════════════${NC}"
-echo -e "${W} Usuário : ${G}$user${NC}"
-echo -e "${W} Senha   : ${G}$pass${NC}"
-echo -e "${W} UUID    : ${G}$uuid${NC}"
-echo -e "${W} Duração : ${G}$t_hours Hora(s)${NC}"
-echo -e "${W} Status  : ${R}Exclusão Automática Ativa${NC}"
+echo -e "${W} Usuário : ${Y}$user${NC}"
+echo -e "${W} Senha   : ${Y}$pass${NC}"
+echo -e "${W} UUID    : ${Y}$uuid${NC}"
+echo -e "${W} Validade: ${G}$t_hours Hora(s) (Até $exp)${NC}"
 echo -e "${C}══════════════════════════════════════════════════════════════${NC}"
 read -p "Pressione ENTER..."
