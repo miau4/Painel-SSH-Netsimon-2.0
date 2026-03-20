@@ -1,142 +1,103 @@
 #!/bin/bash
 
-SERVICE="slowdns-server"
-DIR="/etc/slowdns"
-BIN="/usr/local/bin/dnstt-server"
-
-# Cores para interface
+# Cores
 GREEN='\033[1;32m'
 RED='\033[1;31m'
 CYAN='\033[1;36m'
-YELLOW='\033[1;33m'
 NC='\033[0m'
 
-pause() {
-    echo -e "\n${YELLOW}Pressione ENTER para voltar ao menu...${NC}"
-    read -p ""
-}
+clear
+echo -e "${CYAN}══════════════════════════════════════════${NC}"
+echo -e "${GREEN}        🛰️  INSTALAÇÃO SLOWDNS (DNSTT)      ${NC}"
+echo -e "${CYAN}══════════════════════════════════════════${NC}"
 
-install_slowdns() {
-    clear
-    echo -e "${CYAN}=== CONFIGURAÇÃO SLOWDNS (DNSTT) ===${NC}"
+# 1. PERGUNTAS
+read -p "Domínio principal (ex: google.com): " dom
+read -p "Subdomínio NS (ex: ns.google.com): " ns
+read -p "Porta UDP (Recomendado 5300): " port
+[[ -z "$port" ]] && port=5300
 
-    # Coleta de dados
-    read -p "Domínio/NS (ex: ns-br.meudominio.com): " NS
-    if [[ -z "$NS" ]]; then
-        echo -e "${RED}Erro: O NameServer (NS) é obrigatório!${NC}"
-        pause
-        return
-    fi
+# 2. LIBERAR PORTA 53 (ESSENCIAL PARA UBUNTU NOBLE)
+echo -e "${CYAN}[+] Resetando DNS do sistema...${NC}"
+systemctl stop systemd-resolved &>/dev/null
+systemctl disable systemd-resolved &>/dev/null
+fuser -k 53/udp &>/dev/null # Mata qualquer processo na 53
 
-    read -p "Porta UDP para o SlowDNS (Padrão 5300): " PORT
-    [[ -z "$PORT" ]] && PORT=5300
+# Ajusta o DNS para o servidor não perder internet
+rm -f /etc/resolv.conf
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
 
-    read -p "Porta local para encaminhar (SSH Padrão 22): " LPORT
-    [[ -z "$LPORT" ]] && LPORT=22
+# 3. DEPENDÊNCIAS
+echo -e "${CYAN}[+] Instalando dependências...${NC}"
+apt update -y
+apt install -y git golang curl iptables-persistent &>/dev/null
 
-    # Instalação de dependências
-    echo -e "\n${YELLOW}Instalando dependências e compilando (isso pode demorar)...${NC}"
-    apt update -y && apt install git golang curl -y
+# 4. DOWNLOAD E COMPILAÇÃO (LIMPA ANTES)
+cd /root || exit
+rm -rf dnstt
+git clone https://github.com/m13253/dnstt.git &>/dev/null
+cd dnstt/dnstt-server || exit
+go build &>/dev/null
 
-    # Download e Build do DNSTT
-    if [ ! -f "$BIN" ]; then
-        cd /tmp || exit
-        rm -rf dnstt
-        git clone https://www.bamsoftware.com/git/dnstt.git
-        cd dnstt/dnstt-server || exit
-        go build
-        mv dnstt-server $BIN
-        chmod +x $BIN
-    fi
+if [ ! -f "dnstt-server" ]; then
+    echo -e "${RED}Erro fatal: Falha na compilação do GO!${NC}"
+    exit 1
+fi
 
-    # Configuração de chaves
-    mkdir -p $DIR
-    cd $DIR || exit
-    $BIN -gen-key -privkey-file server.priv -pubkey-file server.pub > /dev/null 2>&1
-    
-    PRIV_KEY=$(cat server.priv)
-    PUB_KEY=$(cat server.pub)
+# 5. GERAR CHAVES (O SERVIÇO SÓ LIGA SE ELAS EXISTIREM)
+echo -e "${CYAN}[+] Gerando chaves de criptografia...${NC}"
+./dnstt-server -gen-key -privkey server.priv -pubkey server.pub &>/dev/null
+PRIV_KEY=$(cat server.priv)
+PUB_KEY=$(cat server.pub)
 
-    # Criação do Serviço Systemd
-    cat > /etc/systemd/system/${SERVICE}.service <<EOF
+# 6. CONFIGURAR FIREWALL (REDIRECIONAMENTO)
+echo -e "${CYAN}[+] Configurando IPTABLES...${NC}"
+iptables -F
+iptables -t nat -F
+iptables -I INPUT -p udp --dport $port -j ACCEPT
+iptables -I INPUT -p udp --dport 53 -j ACCEPT
+iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports $port
+netfilter-persistent save &>/dev/null
+
+# 7. CRIAR SERVIÇO SYSTEMD
+echo -e "${CYAN}[+] Criando serviço DNSTT...${NC}"
+cat > /etc/systemd/system/slowdns-server.service <<EOF
 [Unit]
-Description=SlowDNS DNSTT Server
+Description=SlowDNS Server NETSIMON
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$BIN -udp :$PORT -privkey-file $DIR/server.priv -pubkey-file $DIR/server.pub $NS 127.0.0.1:$LPORT
+User=root
+WorkingDirectory=/root/dnstt/dnstt-server
+ExecStart=/root/dnstt/dnstt-server -udp :$port -privkey server.priv $ns 127.0.0.1:22
 Restart=always
 RestartSec=3
-LimitNOFILE=51200
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # Inicialização
-    systemctl daemon-reload
-    systemctl enable $SERVICE
-    systemctl restart $SERVICE
+# 8. START
+systemctl daemon-reload
+systemctl enable slowdns-server
+systemctl restart slowdns-server
 
-    sleep 2
-
-    if systemctl is-active --quiet $SERVICE; then
-        IP=$(curl -s ifconfig.me)
-        clear
-        echo -e "${GREEN}==============================================="
-        echo -e "       SLOWDNS INSTALADO COM SUCESSO!          "
-        echo -e "===============================================${NC}"
-        echo -e "${CYAN}NS (NameServer):${NC} $NS"
-        echo -e "${CYAN}Porta UDP:      ${NC} $PORT"
-        echo -e "${CYAN}Chave Pública:  ${NC} $PUB_KEY"
-        echo -e "${CYAN}IP do Servidor: ${NC} $IP"
-        echo -e "${GREEN}==============================================="
-        echo -e "${YELLOW}Dica: No App, use a porta 53 ou 5300 dependendo"
-        echo -e "do seu encaminhamento de porta no Cloudflare/DNS.${NC}"
-    else
-        echo -e "${RED}Erro: O serviço não subiu. Verifique as portas.${NC}"
-    fi
-}
-
-status_slowdns() {
+# 9. VALIDAÇÃO FINAL
+if systemctl is-active --quiet slowdns-server; then
     clear
-    echo -e "${CYAN}=== STATUS DO SERVIÇO ===${NC}"
-    systemctl status $SERVICE --no-pager
-}
+    echo -e "${GREEN}══════════════════════════════════════════${NC}"
+    echo -e "${GREEN}       ✅ SLOWDNS ATIVO COM SUCESSO!       ${NC}"
+    echo -e "${GREEN}══════════════════════════════════════════${NC}"
+    echo -e "${CYAN}NS (Nameserver):${NC} $ns"
+    echo -e "${CYAN}Chave Pública  :${NC} ${YELLOW}$PUB_KEY${NC}"
+    echo -e "${CYAN}Porta UDP      :${NC} 53 (Redirecionada para $port)"
+    echo -e "${GREEN}══════════════════════════════════════════${NC}"
+    echo -e "Anote a chave amarela acima para o seu app."
+else
+    echo -e "${RED}Erro: O serviço não subiu.${NC}"
+    echo -e "Log do erro:"
+    journalctl -u slowdns-server --no-pager | tail -n 5
+fi
 
-restart_slowdns() {
-    systemctl restart $SERVICE
-    echo -e "${GREEN}Serviço reiniciado!${NC}"
-}
-
-remove_slowdns() {
-    systemctl stop $SERVICE
-    systemctl disable $SERVICE
-    rm -f /etc/systemd/system/${SERVICE}.service
-    rm -rf $DIR
-    systemctl daemon-reload
-    echo -e "${RED}SlowDNS removido completamente.${NC}"
-}
-
-# MENU
-while true; do
-    clear
-    echo -e "${CYAN}========== NETSIMON 2.0 - SLOWDNS ==========${NC}"
-    echo -e "${WHITE}1)${NC} Instalar/Configurar SlowDNS"
-    echo -e "${WHITE}2)${NC} Ver Status"
-    echo -e "${WHITE}3)${NC} Reiniciar Serviço"
-    echo -e "${WHITE}4)${NC} Remover SlowDNS"
-    echo -e "${WHITE}0)${NC} Voltar ao Menu Principal"
-    echo -e "${CYAN}============================================${NC}"
-    read -p "Escolha uma opção: " op
-
-    case $op in
-        1) install_slowdns; pause ;;
-        2) status_slowdns; pause ;;
-        3) restart_slowdns; pause ;;
-        4) remove_slowdns; pause ;;
-        0) break ;;
-        *) echo -e "${RED}Opção inválida!${NC}"; sleep 1 ;;
-    esac
-done
+read -p "Pressione ENTER para voltar..."
