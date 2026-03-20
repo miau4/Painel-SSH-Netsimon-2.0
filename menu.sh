@@ -95,7 +95,6 @@ case $op in
         fi
         ;;
     11) 
-        # Correção da sintaxe (sem o ponto e vírgula após o &)
         nohup bash "$BASE/limit.sh" >/dev/null 2>&1 &
         echo -e "${G}Limiter ativado em background!${NC}"
         sleep 1
