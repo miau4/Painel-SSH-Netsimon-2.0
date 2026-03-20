@@ -7,11 +7,13 @@ XRAY_CONF="/usr/local/etc/xray/config.json"
 SSL_DIR="/etc/xray-manager/ssl"
 C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; W='\033[1;37m'; NC='\033[0m'
 
+# Captura de IP limpa para evitar erros de HTML no link
 get_ip() {
     local ip=$(wget -qO- ipv4.icanhazip.com || wget -qO- ifconfig.me/ip || curl -s checkip.amazonaws.com)
     echo "$ip" | tr -d '[:space:]'
 }
 
+# Gerador de Certificado SSL Auto-assinado
 gerar_cert() {
     mkdir -p "$SSL_DIR"
     local domain=$(get_ip)
@@ -22,10 +24,13 @@ gerar_cert() {
     chmod -R 755 "$SSL_DIR"
 }
 
+# Configuração de Portas conforme solicitado (80/8080 ou 443)
 gerar_config_enterprise() {
     clear
-    echo -e "${C} Escolha o Modo de Operação Xray:${NC}"
-    echo -e " 1) VLESS + TLS (Portas: 443 Externa / 1080 Interna)"
+    echo -e "${C}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${C}║${W}          CONFIGURAÇÃO DE PROTOCOLOS XRAY             ${C}║${NC}"
+    echo -e "${C}╚══════════════════════════════════════════════════════╝${NC}"
+    echo -e " 1) VLESS + TLS (Porta: 443 | Interna: 1080)"
     echo -e " 2) WebSocket HTTP (Portas: 80 e 8080 Simultâneas)"
     echo -e " 3) Porta Personalizada"
     echo -ne "\nEscolha: "; read p_opt
@@ -53,49 +58,56 @@ gerar_config_enterprise() {
 }
 EOF
     systemctl restart xray
-    echo -e "${G}[OK] Configuração Aplicada!${NC}"
+    echo -e "${G}[OK] Configuração de Rede Aplicada!${NC}"
     sleep 2
 }
 
+# Criação de Usuário com Link Limpo
 add_user() {
     echo -ne "${W}Nome do Usuário: ${NC}"; read nick
     [ -z "$nick" ] && return
     uuid=$(cat /proc/sys/kernel/random/uuid)
     ip=$(get_ip)
     
-    # Adiciona a todos os inbounds ativos (80, 8080, etc)
+    # Injeta o usuário em todos os inbounds (funciona em todas as portas configuradas)
     jq ".inbounds[].settings.clients += [{\"id\": \"$uuid\", \"email\": \"$nick\", \"level\": 0}]" "$XRAY_CONF" > "$XRAY_CONF.tmp" && mv "$XRAY_CONF.tmp" "$XRAY_CONF"
     systemctl restart xray
     
-    # Pega a primeira porta do config para o link
     port=$(jq -r '.inbounds[0].port' "$XRAY_CONF")
     
     clear
-    echo -e "${G}✅ USUÁRIO CRIADO!${NC}"
-    echo -e "Link: ${C}vless://$uuid@$ip:$port?path=/netsimon&security=none&encryption=none&type=ws#$nick${NC}"
-    read -p "ENTER para voltar..."
+    echo -e "${G}✅ USUÁRIO XRAY CRIADO!${NC}"
+    echo -e "${W}--------------------------------------------${NC}"
+    echo -e "${Y}Link VLESS:${NC}"
+    echo -e "${C}vless://$uuid@$ip:$port?path=/netsimon&security=none&encryption=none&type=ws#$nick${NC}"
+    echo -e "${W}--------------------------------------------${NC}"
+    read -p "Pressione ENTER para voltar..."
 }
 
+# Status Detalhado solicitado
 status_detalhado() {
     clear
     echo -e "${C}╔══════════════════════════════════════════════════════╗${NC}"
     echo -e "${C}║${W}           DETALHES TÉCNICOS DE REDE - XRAY           ${C}║${NC}"
     echo -e "${C}╚══════════════════════════════════════════════════════╝${NC}"
-    echo -e "${W}Portas Ativas no Core:${NC}"
+    echo -e "${W}Portas Ativas no JSON:${NC}"
     jq -r '.inbounds[] | "-> Porta: \(.port) | Protocolo: \(.protocol) | Rede: \(.streamSettings.network)"' "$XRAY_CONF"
+    echo -e "\n${W}Status Real da Porta (Netstat):${NC}"
+    netstat -tpln | grep xray | awk '{print $4}'
     echo -e "\n${W}Processo:${NC} $(pgrep xray > /dev/null && echo -e "${G}ATIVO${NC}" || echo -e "${R}PARADO${NC}")"
     echo -e "${C}══════════════════════════════════════════════════════${NC}"
-    read -p "ENTER para voltar..."
+    read -p "Pressione ENTER para voltar..."
 }
 
-# Menu
+# Menu de Interface
 clear
-echo -e " 1) Instalar/Resetar Xray"
-echo -e " 2) Configurar Portas (Sugerido: 443 ou 80/8080)"
-echo -e " 3) Criar Usuário VLESS"
-echo -e " 4) Status Detalhado"
-echo -e " 0) Voltar"
-echo -ne "\nEscolha: "; read opt
+echo -e "${C} 1)${W} Instalar/Resetar Xray Core"
+echo -e "${C} 2)${W} Configurar Portas (443 / 80+8080)"
+echo -e "${C} 3)${W} Criar Novo Usuário"
+echo -e "${C} 4)${W} Status Detalhado do Sistema"
+echo -e "${C} 0)${W} Voltar ao Menu Principal"
+echo -ne "\n${Y}Escolha: ${NC}"; read opt
+
 case $opt in
     1) bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install; gerar_config_enterprise ;;
     2) gerar_config_enterprise ;;
