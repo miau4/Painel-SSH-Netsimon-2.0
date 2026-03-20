@@ -1,47 +1,57 @@
 #!/bin/bash
+# ==========================================
+#   NETSIMON ENTERPRISE - LIMITADOR HÍBRIDO
+# ==========================================
 
 USERDB="/etc/xray-manager/users.db"
-BLOCKED="/etc/xray-manager/blocked.db"
-XRAY_CONF="/etc/xray/config.json"
 XRAY_LOG="/var/log/xray/access.log"
+LOG_LIMIT="/var/log/netsimon_limit.log"
+
+# Cores para o Log Manual
+RED='\033[1;31m'; GREEN='\033[1;32m'; NC='\033[0m'
+
+# Garante que os arquivos existam
+touch "$LOG_LIMIT"
+[ ! -f "$XRAY_LOG" ] && touch "$XRAY_LOG"
 
 while true; do
-    if [ -f "$USERDB" ]; then
-        while IFS="|" read -r user uuid exp pass limit; do
-            [[ -z "$user" ]] && continue
-            [[ ! "$limit" =~ ^[0-9]+$ ]] && limit=1
-
-            # 1. CONTAGEM SSH/DNS
-            cons_ssh=$(ps aux | grep -i sshd | grep -v root | grep -v grep | grep "$user" | wc -l)
-
-            # 2. CONTAGEM XRAY (IPs Únicos)
-            cons_xray=0
-            if [ -f "$XRAY_LOG" ]; then
-                cons_xray=$(grep "$user" "$XRAY_LOG" | tail -n 100 | awk '{print $3}' | cut -d: -f1 | sort -u | grep -v "^$" | wc -l)
-            fi
-
-            total=$((cons_ssh + cons_xray))
-
-            # 3. AÇÃO SE EXCEDER
-            if [ "$total" -gt "$limit" ]; then
-                # Mata conexões SSH e SlowDNS
-                pkill -u "$user" &>/dev/null
-                # Tranca a senha do sistema (Impede novo login SSH)
-                passwd -l "$user" &>/dev/null
-                
-                # Remove do Xray (Opcional: se quiser banir do VLESS na hora)
-                if command -v jq &>/dev/null && [ -f "$XRAY_CONF" ]; then
-                    tmp=$(mktemp)
-                    jq --arg u "$user" '.inbounds[0].settings.clients |= map(select(.email != $u))' "$XRAY_CONF" > "$tmp" && mv "$tmp" "$XRAY_CONF"
-                    systemctl restart xray &>/dev/null
-                fi
-
-                # Registra no banco de bloqueados
-                if ! grep -q "^$user|" "$BLOCKED"; then
-                    echo "$user|$(date +%d/%m/%Y)|$total/$limit" >> "$BLOCKED"
-                fi
-            fi
-        done < "$USERDB"
+    if [ ! -f "$USERDB" ]; then
+        sleep 10
+        continue
     fi
-    sleep 10 # Verificação a cada 10 segundos para ser implacável
+
+    # Lendo o Banco de Dados (user|uuid|exp|pass|limit)
+    while IFS='|' read -r user uuid exp pass limit; do
+        [[ -z "$user" || "$user" =~ ^# ]] && continue
+        
+        # 1. CONTAGEM SSH (Processos ativos)
+        contagem_ssh=$(ps aux | grep -i sshd | grep -v root | grep -v grep | grep "$user" | wc -l)
+
+        # 2. CONTAGEM XRAY (IPs Únicos nos últimos 60 segundos)
+        # Filtra o log pelo e-mail do usuário e conta quantos IPs diferentes aparecem
+        if [ -f "$XRAY_LOG" ]; then
+            contagem_xray=$(tail -n 100 "$XRAY_LOG" | grep "$user" | grep "accepted" | awk '{print $6}' | cut -d: -f1 | sort -u | wc -l)
+        else
+            contagem_xray=0
+        fi
+
+        # Soma total de conexões reais
+        total_conexoes=$((contagem_ssh + contagem_xray))
+
+        # 3. VERIFICAÇÃO DE ABUSO
+        if [[ "$total_conexoes" -gt "$limit" ]]; then
+            # Registra no log o motivo da queda
+            echo "$(date '+%d/%m/%Y %H:%M:%S') - BLOQUEIO: $user | Limite: $limit | Atual: $total_conexoes (SSH:$contagem_ssh Xray:$contagem_xray)" >> "$LOG_LIMIT"
+            
+            # Derruba SSH
+            pkill -u "$user" -f sshd
+            
+            # Para o Xray, como é um serviço compartilhado, o "derrubar" é via desconexão 
+            # de sockets ou forçando o restart se o abuso for crítico (opcional)
+            # systemctl restart xray (Use com cautela para não derrubar todos)
+        fi
+    done < "$USERDB"
+
+    # Intervalo de Varredura (10s é o equilíbrio entre precisão e CPU)
+    sleep 10
 done
