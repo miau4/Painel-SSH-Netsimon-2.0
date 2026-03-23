@@ -74,7 +74,7 @@ fi
 LMT_STAT=$(pgrep -f limit.sh >/dev/null && echo -e "${G}ON${NC}" || echo -e "${R}OFF${NC}")
 
 echo -e "${P}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${P}║${C}                🚀 PAINEL NETSIMON                            ${P}║${NC}"
+echo -e "${P}║${C}                🚀 PAINEL NETSIMON 2.0 🚀                     ${P}║${NC}"
 echo -e "${P}╠══════════════════════════════════════════════════════════════╣${NC}"
 printf "${P}║${NC} ${C}Users:${Y} %-4s ${P}│${C} Online:${G} %-4s ${P}│${C} Expired:${R} %-4s ${P}│${C} Block:${R} %-4s ${P}║\n" "$(get_total)" "$(get_online)" "$(get_expired)" "$(get_blocked)"
 printf "${P}║${NC} ${B}IP:${W} %-15s ${P}│${B} Port:${W} %-8s ${P}│${B} Limiter:${NC} %-8s ${P}║\n" "$IP" "$XP" "$LMT_STAT"
