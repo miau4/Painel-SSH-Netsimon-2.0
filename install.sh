@@ -9,19 +9,25 @@ BASE="/etc/painel"
 
 clear
 echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${C}║${W}             🚀 INSTALADOR NETSIMON ENTERPRISE 2.0              ${C}║${NC}"
+echo -e "${C}║${W}              🚀 INSTALADOR NETSIMON ENTERPRISE 2.0           ${C}║${NC}"
 echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
 
-# 1. Preparação do Sistema
-echo -ne "${W}[+] Instalando dependências e atualizando... ${NC}"
-apt update -y &>/dev/null 
-apt install wget curl jq python3 python3-pip dos2unix nginx stunnel4 net-tools -y &>/dev/null
+# 1. Preparação do Sistema e Blindagem de Portas
+echo -ne "${W}[+] Sincronizando relógio e limpando portas... ${NC}"
+timedatectl set-timezone America/Sao_Paulo
+# Remove sequestradores nativos da Oracle/Ubuntu
+systemctl stop apache2 oracle-cloud-agent oracle-cloud-agent-updater nginx &>/dev/null
+systemctl disable apache2 oracle-cloud-agent oracle-cloud-agent-updater &>/dev/null
+apt purge apache2 -y &>/dev/null
 echo -e "${G}OK${NC}"
 
-# 1.5 Configuração de Portas (Nginx 81 e Stunnel 8443)
-echo -ne "${W}[+] Blindando portas (Nginx -> 81 | Stunnel -> 8443)... ${NC}"
+echo -ne "${W}[+] Instalando dependências... ${NC}"
+apt update -y &>/dev/null 
+apt install wget curl jq python3 python3-pip dos2unix nginx stunnel4 net-tools lsof -y &>/dev/null
+echo -e "${G}OK${NC}"
 
-# Mover Nginx para a 81 para liberar a 80
+# 2. Configuração de Portas (Nginx e Python -> 81)
+echo -ne "${W}[+] Configurando Webserver na porta 81... ${NC}"
 rm -f /etc/nginx/sites-enabled/default
 cat << 'EOF' > /etc/nginx/sites-available/netsimon_web
 server {
@@ -35,8 +41,10 @@ server {
 EOF
 ln -sf /etc/nginx/sites-available/netsimon_web /etc/nginx/sites-enabled/
 systemctl restart nginx &>/dev/null
+echo -e "${G}OK${NC}"
 
-# Configurar Stunnel4 na porta 8443
+# 3. Configuração Stunnel4 (8443)
+echo -ne "${W}[+] Configurando Stunnel (Porta 8443)... ${NC}"
 openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 -sha256 -subj "/CN=Netsimon" -keyout /etc/stunnel/stunnel.pem -out /etc/stunnel/stunnel.pem &>/dev/null
 cat << 'EOF' > /etc/stunnel/stunnel.conf
 pid = /var/run/stunnel4.pid
@@ -54,12 +62,15 @@ sed -i 's/ENABLED=0/ENABLED=1/g' /etc/default/stunnel4
 systemctl restart stunnel4 &>/dev/null
 echo -e "${G}OK${NC}"
 
-# 2. Criação de Estrutura
+# 4. Criação de Estrutura e Logs
 mkdir -p "$BASE"
 mkdir -p "/etc/xray-manager/ssl"
 mkdir -p "/etc/slowdns"
+mkdir -p "/var/log/xray"
+touch /var/log/xray/access.log
+chmod 666 /var/log/xray/access.log
 
-# 3. Download dos Módulos Core
+# 5. Download dos Módulos Core
 arquivos=(
     "menu.sh" "adduser.sh" "addtest.sh" "deluser.sh" 
     "online.sh" "limit.sh" "unblock.sh" "websocket.sh" 
@@ -80,8 +91,24 @@ for file in "${arquivos[@]}"; do
     fi
 done
 
-# 4. Configuração de Atalhos e Boot
-echo -ne "${W}[+] Configurando atalhos de sistema... ${NC}"
+# 6. Baixar e Aplicar Configuração Pré-configurada do Xray
+echo -ne "${W}[+] Aplicando config.json otimizada... ${NC}"
+mkdir -p /etc/xray
+# Tenta baixar do seu repositório, se falhar cria uma base
+wget -q -O /etc/xray/config.json "$REPO/config.json"
+if [ ! -s /etc/xray/config.json ]; then
+    # Fallback caso o arquivo não esteja no GitHub ainda
+    cat << 'EOF' > /etc/xray/config.json
+{
+  "log": {"access": "/var/log/xray/access.log","loglevel": "info"},
+  "inbounds": [{"port": 443,"protocol": "vless","settings": {"clients": []}}]
+}
+EOF
+fi
+echo -e "${G}OK${NC}"
+
+# 7. Configuração de Atalhos e Boot
+echo -ne "${W}[+] Finalizando atalhos e boot... ${NC}"
 echo "bash $BASE/menu.sh" > /usr/local/bin/menu
 chmod +x /usr/local/bin/menu
 cp "$BASE/repair.sh" "/etc/xray-manager/repair.sh" 2>/dev/null
@@ -91,17 +118,20 @@ echo -ne "${W}[+] Ativando Auto-Recovery no Boot... ${NC}"
 (crontab -l 2>/dev/null | grep -v "boot_check.sh"; echo "@reboot bash $BASE/boot_check.sh") | crontab -
 echo -e "${G}OK${NC}"
 
-# 5. Inicialização de Serviços Críticos
+# 8. Inicialização (Python na 81 e WebSocket na 80)
 echo -e "${Y}[!] Iniciando serviços Enterprise...${NC}"
-# Inicia o WebSocket na porta 80 por padrão
 pkill -f "proxy.py"
-nohup python3 "$BASE/proxy.py" 80 > /dev/null 2>&1 &
+pkill -f "checkuser.py"
+# Python na 81 (conforme solicitado para não brigar com a 80)
+nohup python3 "$BASE/proxy.py" 81 > /dev/null 2>&1 &
 nohup python3 "$BASE/checkuser.py" > /dev/null 2>&1 &
+# Reinicia o Xray para assumir os novos logs
+systemctl restart xray &>/dev/null
 bash "$BASE/boot_check.sh" &>/dev/null
 
 echo -e "\n${G}✅ INSTALAÇÃO CONCLUÍDA COM SUCESSO!${NC}"
-echo -e "${W}Porta 80: ${C}WebSocket Ativo${NC}"
-echo -e "${W}Porta 81: ${C}Nginx (Painel)${NC}"
-echo -e "${W}Porta 8443: ${C}Stunnel (SSL)${NC}"
+echo -e "${W}Porta 80: ${C}Livre para Túnel/Xray${NC}"
+echo -e "${W}Porta 81: ${C}Python / Nginx Web${NC}"
+echo -e "${W}Fuso Horário: ${C}América/São Paulo${NC}"
 echo -e "${W}Digite ${C}menu${W} para gerenciar seu servidor.${NC}"
 sleep 3
