@@ -24,7 +24,7 @@ iptables -P INPUT ACCEPT
 iptables -P FORWARD ACCEPT
 iptables -P OUTPUT ACCEPT
 
-# Remove sequestradores nativos da Oracle/Ubuntu
+# Remove sequestradores nativos da Oracle/Ubuntu que ocupam portas 80/443
 systemctl stop apache2 oracle-cloud-agent oracle-cloud-agent-updater nginx &>/dev/null
 systemctl disable apache2 oracle-cloud-agent oracle-cloud-agent-updater &>/dev/null
 apt purge apache2 -y &>/dev/null
@@ -32,7 +32,7 @@ echo -e "${G}OK${NC}"
 
 echo -ne "${W}[+] Instalando dependências essenciais... ${NC}"
 apt update -y &>/dev/null 
-apt install wget curl jq python3 python3-pip dos2unix nginx stunnel4 net-tools lsof iptables-persistent -y &>/dev/null
+apt install wget curl jq python3 python3-pip dos2unix nginx stunnel4 net-tools lsof iptables-persistent screen -y &>/dev/null
 echo -e "${G}OK${NC}"
 
 # 2. Configuração de Portas (Nginx e Python -> 81)
@@ -104,13 +104,11 @@ done
 
 # 6. Xray - Binário e Configuração (PULO DO GATO: SETCAP)
 echo -ne "${W}[+] Instalando Binário Xray e aplicando Setcap... ${NC}"
-# Baixa o instalador oficial do Xray para garantir o binário atualizado
 bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) &>/dev/null
-# O PULO DO GATO: Permite abrir porta 443 sem ser root total
 setcap 'cap_net_bind_service=+ep' /usr/local/bin/xray
 
+# Baixa config.json do repo ou cria fallback
 wget -q -O /usr/local/etc/xray/config.json "$REPO/config.json"
-# Fallback caso o config.json não exista no repo
 if [ ! -s /usr/local/etc/xray/config.json ]; then
     cat << 'EOF' > /usr/local/etc/xray/config.json
 {
@@ -121,7 +119,7 @@ EOF
 fi
 echo -e "${G}OK${NC}"
 
-# 7. Configuração do Serviço Systemd (PULO DO GATO: RECOVERY)
+# 7. Configuração do Serviço Systemd
 echo -ne "${W}[+] Configurando Xray Service... ${NC}"
 cat << 'EOF' > /etc/systemd/system/xray.service
 [Unit]
@@ -146,14 +144,22 @@ systemctl daemon-reload
 systemctl enable xray &>/dev/null
 echo -e "${G}OK${NC}"
 
-# 8. Finalização de Atalhos e Boot
+# 8. Ativação do Limitador e Atalhos (O PULO DO GATO: SCREEN + CRON)
+echo -ne "${W}[+] Ativando Limitador Híbrido e Atalhos... ${NC}"
 echo "bash $BASE/menu.sh" > /usr/local/bin/menu
 chmod +x /usr/local/bin/menu
+
+# Inicia o limitador agora mesmo em background
+screen -dmS limitador bash $BASE/limit.sh
+
+# Garante persistência no reboot via Crontab
+(crontab -l 2>/dev/null | grep -v "limit.sh"; echo "@reboot screen -dmS limitador bash $BASE/limit.sh") | crontab -
+(crontab -l 2>/dev/null | grep -v "boot_check.sh"; echo "@reboot bash $BASE/boot_check.sh") | crontab -
+
+# Salva as regras de iptables
+netfilter-persistent save &>/dev/null
 echo -e "${G}OK${NC}"
 
-# Salva as regras de iptables para o reboot
-netfilter-persistent save &>/dev/null
-
-echo -e "\n${G}✅ INSTALAÇÃO CONCLUÍDA!${NC}"
+echo -e "\n${G}✅ INSTALAÇÃO CONCLUÍDA COM SUCESSO!${NC}"
 echo -e "${W}Portas Abertas: ${C}443 (Xray), 80 (WS), 81 (Web), 8443 (SSL)${NC}"
 echo -e "${W}Digite ${C}menu${W} para começar.${NC}"
