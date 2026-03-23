@@ -9,21 +9,30 @@ BASE="/etc/painel"
 
 clear
 echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${C}║${W}              🚀 INSTALADOR NETSIMON ENTERPRISE 2.0           ${C}║${NC}"
+echo -e "${C}║${W}                🚀 INSTALADOR NETSIMON ENTERPRISE 2.0           ${C}║${NC}"
 echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
 
-# 1. Preparação do Sistema e Blindagem de Portas
-echo -ne "${W}[+] Sincronizando relógio e limpando portas... ${NC}"
+# 1. Preparação do Sistema e Blindagem de Portas (PULO DO GATO: FIREWALL)
+echo -ne "${W}[+] Sincronizando relógio e abrindo firewall... ${NC}"
 timedatectl set-timezone America/Sao_Paulo
+
+# Limpeza total de regras que bloqueiam a Oracle
+iptables -F && iptables -X
+iptables -t nat -F && iptables -t nat -X
+iptables -t mangle -F && iptables -t mangle -X
+iptables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+iptables -P OUTPUT ACCEPT
+
 # Remove sequestradores nativos da Oracle/Ubuntu
 systemctl stop apache2 oracle-cloud-agent oracle-cloud-agent-updater nginx &>/dev/null
 systemctl disable apache2 oracle-cloud-agent oracle-cloud-agent-updater &>/dev/null
 apt purge apache2 -y &>/dev/null
 echo -e "${G}OK${NC}"
 
-echo -ne "${W}[+] Instalando dependências... ${NC}"
+echo -ne "${W}[+] Instalando dependências essenciais... ${NC}"
 apt update -y &>/dev/null 
-apt install wget curl jq python3 python3-pip dos2unix nginx stunnel4 net-tools lsof -y &>/dev/null
+apt install wget curl jq python3 python3-pip dos2unix nginx stunnel4 net-tools lsof iptables-persistent -y &>/dev/null
 echo -e "${G}OK${NC}"
 
 # 2. Configuração de Portas (Nginx e Python -> 81)
@@ -62,13 +71,15 @@ sed -i 's/ENABLED=0/ENABLED=1/g' /etc/default/stunnel4
 systemctl restart stunnel4 &>/dev/null
 echo -e "${G}OK${NC}"
 
-# 4. Criação de Estrutura e Logs
+# 4. Estrutura e Logs (PULO DO GATO: PERMISSÕES TOTAIS)
 mkdir -p "$BASE"
 mkdir -p "/etc/xray-manager/ssl"
 mkdir -p "/etc/slowdns"
 mkdir -p "/var/log/xray"
-touch /var/log/xray/access.log
-chmod 666 /var/log/xray/access.log
+mkdir -p "/usr/local/etc/xray"
+touch /var/log/xray/access.log /var/log/xray/error.log
+chmod -R 777 /var/log/xray
+chown -R root:root /var/log/xray
 
 # 5. Download dos Módulos Core
 arquivos=(
@@ -78,7 +89,7 @@ arquivos=(
     "boot_check.sh" "repair.sh" "checkuser.py" "checkuser.sh"
 )
 
-echo -e "${Y}[!] Baixando componentes do ecossistema...${NC}"
+echo -e "${Y}[!] Baixando ecossistema Netsimon...${NC}"
 for file in "${arquivos[@]}"; do
     printf "${W}  -> %-20s ${NC}" "$file"
     wget -q -O "$BASE/$file" "$REPO/$file"
@@ -91,47 +102,58 @@ for file in "${arquivos[@]}"; do
     fi
 done
 
-# 6. Baixar e Aplicar Configuração Pré-configurada do Xray
-echo -ne "${W}[+] Aplicando config.json otimizada... ${NC}"
-mkdir -p /etc/xray
-# Tenta baixar do seu repositório, se falhar cria uma base
-wget -q -O /etc/xray/config.json "$REPO/config.json"
-if [ ! -s /etc/xray/config.json ]; then
-    # Fallback caso o arquivo não esteja no GitHub ainda
-    cat << 'EOF' > /etc/xray/config.json
+# 6. Xray - Binário e Configuração (PULO DO GATO: SETCAP)
+echo -ne "${W}[+] Instalando Binário Xray e aplicando Setcap... ${NC}"
+# Baixa o instalador oficial do Xray para garantir o binário atualizado
+bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) &>/dev/null
+# O PULO DO GATO: Permite abrir porta 443 sem ser root total
+setcap 'cap_net_bind_service=+ep' /usr/local/bin/xray
+
+wget -q -O /usr/local/etc/xray/config.json "$REPO/config.json"
+# Fallback caso o config.json não exista no repo
+if [ ! -s /usr/local/etc/xray/config.json ]; then
+    cat << 'EOF' > /usr/local/etc/xray/config.json
 {
-  "log": {"access": "/var/log/xray/access.log","loglevel": "info"},
-  "inbounds": [{"port": 443,"protocol": "vless","settings": {"clients": []}}]
+  "log": {"access": "/var/log/xray/access.log","error": "/var/log/xray/error.log","loglevel": "warning"},
+  "inbounds": [{"port": 443,"protocol": "vless","settings": {"clients": [],"decryption": "none"},"streamSettings": {"network": "xhttp","security": "tls","tlsSettings": {"certificates": [{"certificateFile": "/etc/xray-manager/ssl/fullchain.pem","keyFile": "/etc/xray-manager/ssl/privkey.pem"}]},"xhttpSettings": {"mode": "packet-up","path": "/"}}}]
 }
 EOF
 fi
 echo -e "${G}OK${NC}"
 
-# 7. Configuração de Atalhos e Boot
-echo -ne "${W}[+] Finalizando atalhos e boot... ${NC}"
+# 7. Configuração do Serviço Systemd (PULO DO GATO: RECOVERY)
+echo -ne "${W}[+] Configurando Xray Service... ${NC}"
+cat << 'EOF' > /etc/systemd/system/xray.service
+[Unit]
+Description=Xray Service - Netsimon
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable xray &>/dev/null
+echo -e "${G}OK${NC}"
+
+# 8. Finalização de Atalhos e Boot
 echo "bash $BASE/menu.sh" > /usr/local/bin/menu
 chmod +x /usr/local/bin/menu
-cp "$BASE/repair.sh" "/etc/xray-manager/repair.sh" 2>/dev/null
 echo -e "${G}OK${NC}"
 
-echo -ne "${W}[+] Ativando Auto-Recovery no Boot... ${NC}"
-(crontab -l 2>/dev/null | grep -v "boot_check.sh"; echo "@reboot bash $BASE/boot_check.sh") | crontab -
-echo -e "${G}OK${NC}"
+# Salva as regras de iptables para o reboot
+netfilter-persistent save &>/dev/null
 
-# 8. Inicialização (Python na 81 e WebSocket na 80)
-echo -e "${Y}[!] Iniciando serviços Enterprise...${NC}"
-pkill -f "proxy.py"
-pkill -f "checkuser.py"
-# Python na 81 (conforme solicitado para não brigar com a 80)
-nohup python3 "$BASE/proxy.py" 81 > /dev/null 2>&1 &
-nohup python3 "$BASE/checkuser.py" > /dev/null 2>&1 &
-# Reinicia o Xray para assumir os novos logs
-systemctl restart xray &>/dev/null
-bash "$BASE/boot_check.sh" &>/dev/null
-
-echo -e "\n${G}✅ INSTALAÇÃO CONCLUÍDA COM SUCESSO!${NC}"
-echo -e "${W}Porta 80: ${C}Livre para Túnel/Xray${NC}"
-echo -e "${W}Porta 81: ${C}Python / Nginx Web${NC}"
-echo -e "${W}Fuso Horário: ${C}América/São Paulo${NC}"
-echo -e "${W}Digite ${C}menu${W} para gerenciar seu servidor.${NC}"
-sleep 3
+echo -e "\n${G}✅ INSTALAÇÃO CONCLUÍDA!${NC}"
+echo -e "${W}Portas Abertas: ${C}443 (Xray), 80 (WS), 81 (Web), 8443 (SSL)${NC}"
+echo -e "${W}Digite ${C}menu${W} para começar.${NC}"
