@@ -1,49 +1,75 @@
 #!/bin/bash
-# NETSIMON ENTERPRISE - MONITOR DE RECURSOS
+# ==========================================
+#    PAINEL NETSIMON - MONITOR REAL-TIME
+# ==========================================
 
-# Cores
-C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'; W='\033[1;37m'; NC='\033[0m'
+# Cores Padronizadas
+P='\033[1;35m'; G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'
+W='\033[1;37m'; C='\033[1;36m'; NC='\033[0m'
 
-# Função para pegar carga da CPU
+# Função para carga da CPU (Mais precisa)
 cpu_usage() {
-    top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}'
+    grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {printf "%.1f", usage}'
 }
 
-# Função para pegar RAM
+# Função para RAM
 ram_usage() {
     free -h | awk '/Mem:/ {print $3 "/" $2}'
 }
 
-# Função para conexões SSH
+# Função para usuários SSH/WS Online (Conta processos reais de usuários)
 ssh_conn() {
-    ss -tnp | grep ":22" | grep "ESTAB" | wc -l
+    ps aux | grep -i sshd | grep -v root | grep -v grep | wc -l
 }
 
 # Função para conexões Xray
 xray_conn() {
-    ss -tnp | grep -E ":443|:80" | grep "xray" | wc -l 2>/dev/null || echo "0"
+    # Tenta contar conexões estabelecidas no Xray (ajuste a porta se necessário)
+    netstat -anp | grep :443 | grep ESTABLISHED | wc -l
 }
 
-clear
-echo -e "${C}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${C}║${W}            📊 MONITOR DE RECURSOS (REAL-TIME)               ${C}║${NC}"
-echo -e "${C}╚══════════════════════════════════════════════════════════════╝${NC}"
-echo -e ""
-echo -e " ${W}SERVIDOR IP:${NC}  $(curl -s --connect-timeout 2 ifconfig.me || echo "Offline")"
-echo -e " ${W}UPTIME:     ${NC}  $(uptime -p)"
-echo -e ""
-echo -e " ${C}RECURSOS DO SISTEMA:${NC}"
-echo -e " ${W}CPU Uso:    ${G}$(cpu_usage)%${NC}"
-echo -e " ${W}RAM Uso:    ${G}$(ram_usage)${NC}"
-echo -e ""
-echo -e " ${C}CONEXÕES ATIVAS:${NC}"
-echo -e " ${W}SSH / WS:   ${Y}$(ssh_conn) usuários online${NC}"
-echo -e " ${W}Xray Core:  ${Y}$(xray_conn) conexões${NC}"
-echo -e ""
-echo -e " ${C}SERVIÇOS:${NC}"
-echo -ne " ${W}Xray Core:  ${NC}"; pgrep xray >/dev/null && echo -e "${G}ATIVO${NC}" || echo -e "${R}INATIVO${NC}"
-echo -ne " ${W}Limiter:    ${NC}"; pgrep -f limit.sh >/dev/null && echo -e "${G}ATIVO${NC}" || echo -e "${R}INATIVO${NC}"
-echo -e ""
-echo -e "${C}══════════════════════════════════════════════════════════════${NC}"
-echo -e "${Y}  Dica: Use CTRL+C para sair deste monitor.${NC}"
-echo -e "${C}══════════════════════════════════════════════════════════════${NC}"
+# Loop de atualização (Real-Time)
+while true; do
+    clear
+    echo -e "${P}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${P}║${W}             📊 MONITOR DE RECURSOS (REAL-TIME)               ${P}║${NC}"
+    echo -e "${P}╚══════════════════════════════════════════════════════════════╝${NC}"
+    
+    IP_SERV=$(curl -s --connect-timeout 2 ifconfig.me || echo "Offline")
+    UP_TIME=$(uptime -p | sed 's/up //')
+
+    echo -e " ${W}SERVIDOR IP:${NC}  ${C}$IP_SERV${NC}"
+    echo -e " ${W}UPTIME:     ${NC}  ${C}$UP_TIME${NC}"
+    echo -e ""
+    echo -e " ${P}RECURSOS DO SISTEMA:${NC}"
+    echo -e " ${W}CPU Uso:    ${G}$(cpu_usage)%${NC}"
+    echo -e " ${W}RAM Uso:    ${G}$(ram_usage)${NC}"
+    echo -e ""
+    echo -e " ${P}CONEXÕES ATIVAS:${NC}"
+    echo -e " ${W}SSH / WS:   ${Y}$(ssh_conn) usuários online${NC}"
+    echo -e " ${W}Xray Core:  ${Y}$(xray_conn) conexões ativas${NC}"
+    echo -e ""
+    echo -e " ${P}STATUS DOS SERVIÇOS:${NC}"
+    
+    # Verificação de Xray
+    if pgrep xray >/dev/null; then
+        echo -e " ${W}Xray Core:  ${G}ATIVO${NC}"
+    else
+        echo -e " ${W}Xray Core:  ${R}INATIVO${NC}"
+    fi
+
+    # Verificação de Limiter
+    if pgrep -f limit.sh >/dev/null; then
+        echo -e " ${W}Limiter:    ${G}ATIVO${NC}"
+    else
+        echo -e " ${W}Limiter:    ${R}INATIVO${NC}"
+    fi
+
+    echo -e ""
+    echo -e "${P}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${Y}   Dica: Use CTRL+C para sair deste monitor.${NC}"
+    echo -e "${P}══════════════════════════════════════════════════════════════${NC}"
+    
+    # Intervalo de 2 segundos antes de atualizar a tela novamente
+    sleep 2
+done
