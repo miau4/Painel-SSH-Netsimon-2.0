@@ -1,54 +1,63 @@
 #!/bin/bash
 # ==========================================
-# Gerenciador SlowDNS - Netsimon 2.0 (FINAL)
+#    GERENCIADOR SLOWDNS - PAINEL NETSIMON
 # ==========================================
 
+# Cores Padronizadas
+P='\033[1;35m'; G='\033[1;32m'; R='\033[1;31m'; Y='\033[1;33m'
+W='\033[1;37m'; C='\033[1;36m'; NC='\033[0m'
+
+# Caminhos
+DIR="/etc/slowdns"
+BIN="$DIR/dnstt-server"
+
 show_status() {
-    if systemctl is-active --quiet slowdns; then
-        echo -e "\e[1;32m[ATIVO]\e[0m"
+    if systemctl is-active --quiet slowdns 2>/dev/null; then
+        echo -e "${G}● ATIVO${NC}"
     else
-        echo -e "\e[1;31m[PARADO / NÃO INSTALADO]\e[0m"
+        echo -e "${R}○ PARADO / NÃO INSTALADO${NC}"
     fi
 }
 
 install_slowdns() {
     clear
-    echo "========================================="
-    echo "   INSTALADOR SLOWDNS (VERSÃO FINAL)     "
-    echo "========================================="
+    echo -e "${P}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${P}║${W}                📡 INSTALADOR SLOWDNS                         ${P}║${NC}"
+    echo -e "${P}╚══════════════════════════════════════════════════════════════╝${NC}"
     
-    read -p "Digite seu NameServer (NS): " NS_DOMAIN
+    echo -ne "${W}Digite seu NameServer (NS): ${NC}"; read NS_DOMAIN
     [[ -z "$NS_DOMAIN" ]] && return
 
-    # Usando o que já compilamos para ganhar tempo
-    if [[ ! -f "/etc/slowdns/dnstt-server" ]]; then
-        echo "[1/3] Movendo binário compilado..."
-        mkdir -p /etc/slowdns
-        cp /root/dnstt-build/dnstt-server/dnstt-server /etc/slowdns/dnstt-server
-        chmod +x /etc/slowdns/dnstt-server
+    # 1. Preparação de Binário
+    if [[ ! -f "$BIN" ]]; then
+        echo -e "${Y}[1/3] Movendo binário compilado...${NC}"
+        mkdir -p "$DIR"
+        if [ -f "/root/dnstt-build/dnstt-server/dnstt-server" ]; then
+            cp /root/dnstt-build/dnstt-server/dnstt-server "$BIN"
+        else
+            echo -e "${R}ERRO: Binário compilado não encontrado em /root/dnstt-build!${NC}"
+            read -p "Pressione Enter..." ; return
+        fi
+        chmod +x "$BIN"
     fi
 
-    cd /etc/slowdns
-
-    echo "[2/3] Gerando Chaves (Novo Comando)..."
-    rm -f server.key server.pub
+    # 2. Geração de Chaves
+    echo -e "${Y}[2/3] Gerando par de chaves criptográficas...${NC}"
+    cd "$DIR"
+    rm -f priv.key pub.key
+    "$BIN" -gen-key -privkey-file priv.key -pubkey-file pub.key > /dev/null 2>&1
     
-    # Comando atualizado conforme o log de erro anterior
-    ./dnstt-server -gen-key -privkey-file priv.key -pubkey-file pub.key > /dev/null 2>&1
-    
-    # Lendo as chaves geradas nos arquivos
     PRIV_KEY=$(cat priv.key 2>/dev/null)
     PUB_KEY=$(cat pub.key 2>/dev/null)
 
     if [[ -z "$PUB_KEY" ]]; then
-        echo -e "\e[1;31mERRO: Falha ao gerar arquivos de chave.\e[0m"
-        read -p "Pressione Enter..."
-        return
+        echo -e "${R}ERRO: Falha ao gerar arquivos de chave.${NC}"
+        read -p "Pressione Enter..." ; return
     fi
-
     echo "$NS_DOMAIN" > domain
 
-    echo "[3/3] Configurando Firewall e Serviço..."
+    # 3. Firewall e Systemd
+    echo -e "${Y}[3/3] Configurando Firewall e Serviço Systemd...${NC}"
     iptables -F
     iptables -t nat -F
     iptables -t nat -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5353
@@ -57,14 +66,14 @@ install_slowdns() {
 
     cat > /etc/systemd/system/slowdns.service <<EOF
 [Unit]
-Description=SlowDNS Netsimon
+Description=SlowDNS Netsimon 2.0
 After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/etc/slowdns
-ExecStart=/etc/slowdns/dnstt-server -udp :5353 -privkey-file /etc/slowdns/priv.key $NS_DOMAIN 127.0.0.1:22
+WorkingDirectory=$DIR
+ExecStart=$BIN -udp :5353 -privkey-file $DIR/priv.key $NS_DOMAIN 127.0.0.1:22
 Restart=always
 
 [Install]
@@ -76,42 +85,57 @@ EOF
     systemctl restart slowdns
 
     clear
-    echo "========================================="
-    echo "       SLOWDNS INSTALADO COM SUCESSO!    "
-    echo "========================================="
-    echo -e "Status          : $(show_status)"
-    echo -e "NameServer (NS) : \e[1;33m$NS_DOMAIN\e[0m"
-    echo -e "Chave Pública   : \e[1;32m$PUB_KEY\e[0m"
-    echo "========================================="
-    echo "Copie a chave acima para o seu aplicativo."
+    echo -e "${G}✅ SLOWDNS CONFIGURADO COM SUCESSO!${NC}"
+    echo -e "${P}────────────────────────────────────────────────────────────────${NC}"
+    echo -e "${W} NameServer (NS) : ${Y}$NS_DOMAIN${NC}"
+    echo -e "${W} Chave Pública   : ${G}$PUB_KEY${NC}"
+    echo -e "${P}────────────────────────────────────────────────────────────────${NC}"
+    echo -e "${W}Copie a chave acima para o seu aplicativo (Injetor/HTTP Custom).${NC}"
     read -p "Pressione [Enter] para voltar..."
 }
 
-# Menu Principal
+# Menu Loop
 while true; do
     clear
-    echo "========================================="
-    echo "         GERENCIADOR SLOWDNS             "
-    echo "========================================="
-    echo -e "Status: $(show_status)"
-    [[ -f "/etc/slowdns/domain" ]] && echo -e "NS: \e[1;33m$(cat /etc/slowdns/domain)\e[0m"
-    echo "========================================="
-    echo "[1] Instalar / Reconfigurar"
-    echo "[2] Ver Chave Pública"
-    echo "[3] Desinstalar"
-    echo "[0] Sair"
-    read -p "Opção: " opc
+    echo -e "${P}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${P}║${W}                📡 GERENCIADOR SLOWDNS                        ${P}║${NC}"
+    echo -e "${P}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo -e " STATUS: $(show_status)"
+    [[ -f "$DIR/domain" ]] && echo -e " NS ATUAL: ${Y}$(cat $DIR/domain)${NC}"
+    echo -e "${P}────────────────────────────────────────────────────────────────${NC}"
+    echo -e " ${G}[1]${W} Instalar / Reconfigurar SlowDNS${NC}"
+    echo -e " ${G}[2]${W} Ver Minha Chave Pública (PUB KEY)${NC}"
+    echo -e " ${R}[3]${W} Parar e Desinstalar SlowDNS${NC}"
+    echo -e "${P}────────────────────────────────────────────────────────────────${NC}"
+    echo -e " ${R}[0] SAIR${NC}"
+    echo -e "${P}────────────────────────────────────────────────────────────────${NC}"
+    echo -ne " Escolha uma opção: "; read opc
+    
     case $opc in
         1) install_slowdns ;;
         2) 
             clear
-            if [ -f "/etc/slowdns/pub.key" ]; then
-                echo "Chave Pública: $(cat /etc/slowdns/pub.key)"
+            if [ -f "$DIR/pub.key" ]; then
+                echo -e "${P}╔══════════════════════════════════════════╗${NC}"
+                echo -e "${W}   SUA CHAVE PÚBLICA SLOWDNS:              ${NC}"
+                echo -e "${P}╚══════════════════════════════════════════╝${NC}"
+                echo -e "${G}$(cat $DIR/pub.key)${NC}"
+                echo -e "${P}────────────────────────────────────────────${NC}"
             else
-                echo "Não instalado."
+                echo -e "${R}Erro: SlowDNS não está instalado.${NC}"
             fi
-            read -p "Enter..." ;;
-        3) systemctl stop slowdns; rm -rf /etc/slowdns; echo "Removido!"; sleep 2 ;;
-        0) exit ;;
+            read -p "Pressione ENTER para voltar..." ;;
+        3) 
+            echo -e "${Y}Removendo SlowDNS e limpando regras...${NC}"
+            systemctl stop slowdns >/dev/null 2>&1
+            systemctl disable slowdns >/dev/null 2>&1
+            rm -f /etc/systemd/system/slowdns.service
+            systemctl daemon-reload
+            # Limpa as regras de redirecionamento específicas
+            iptables -t nat -D PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5353 2>/dev/null
+            rm -rf "$DIR"
+            echo -e "${G}SlowDNS removido com sucesso!${NC}"; sleep 2 ;;
+        0) exit 0 ;;
+        *) echo -e "${R}Opção inválida!${NC}"; sleep 1 ;;
     esac
 done
