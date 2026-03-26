@@ -6,12 +6,12 @@
 BASE="/etc/painel"
 USERDB="/etc/painel/usuarios.db"
 BLOCKED="/etc/xray-manager/blocked.db"
-# CAMINHO CORRIGIDO:
 XRAY_CONF="/usr/local/etc/xray/config.json"
 
 # Paleta de Cores Customizada
 P='\033[1;35m'; G='\033[1;32m'; GD='\033[0;32m'; R='\033[1;31m'; Y='\033[1;33m'
 W='\033[1;37m'; C='\033[1;36m'; B='\033[1;34m'; NC='\033[0m'
+O='\033[38;5;208m' # Laranja FF9900
 
 # Funções de Status do Sistema
 get_cpu() { top -bn1 | grep "Cpu(s)" | awk '{print int($2 + $4)}'; }
@@ -31,9 +31,7 @@ get_expired() {
     [[ ! -f "$USERDB" ]] && echo 0 && return
     while IFS='|' read -r user uuid exp pass lim; do
         exp_s=$(date -d "$exp" +%s 2>/dev/null)
-        if [[ $? -eq 0 ]]; then
-            [[ $exp_s -lt $hoje ]] && ((cont++))
-        fi
+        if [[ $? -eq 0 && $exp_s -lt $hoje ]]; then ((cont++)); fi
     done < "$USERDB"
     echo "$cont"
 }
@@ -41,28 +39,26 @@ get_expired() {
 check_proto() {
     local serv=$1
     if pgrep -f "$serv" > /dev/null || systemctl is-active --quiet "$serv" 2>/dev/null; then
-        echo -e "${G}ON${NC}"
+        echo -ne "${G}ON${NC}"
     else
-        echo -e "${R}OFF${NC}"
+        echo -ne "${R}OFF${NC}"
     fi
 }
 
 bar() {
     local p=$1; local size=20; local filled=$((p * size / 100)); local empty=$((size - filled))
-    local color=$G
-    [ $p -gt 70 ] && color=$Y
-    [ $p -gt 85 ] && color=$R
+    local color=$G; [ $p -gt 70 ] && color=$O; [ $p -gt 85 ] && color=$R
     local b="${color}["
     for ((i=0;i<filled;i++)); do b+="#"; done
     for ((i=0;i<empty;i++)); do b+="-"; done
-    b+="] $p%${NC}"
-    echo -e "$b"
+    echo -e "${b}] $p%${NC}"
 }
 
 while true; do
 clear
 CPU=$(get_cpu); RAM=$(get_ram); DISK=$(get_disk)
 IP=$(wget -qO- ipv4.icanhazip.com || echo "0.0.0.0")
+HORA=$(date +"%H:%M:%S")
 
 if [ -f "$XRAY_CONF" ]; then
     XP=$(jq -r '.inbounds[].port' "$XRAY_CONF" 2>/dev/null | xargs | sed 's/ /,/g')
@@ -71,39 +67,56 @@ else
     XP="--"
 fi
 
-LMT_STAT=$(pgrep -f limit.sh >/dev/null && echo -e "${G}ON${NC}" || echo -e "${R}OFF${NC}")
+LMT_STAT=$(pgrep -f limit.sh >/dev/null && echo -ne "${G}ON${NC}" || echo -ne "${R}OFF${NC}")
 
-echo -e "${P}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${P}║${C}                🚀 PAINEL NETSIMON 2.0 🚀                     ${P}║${NC}"
-echo -e "${P}╠══════════════════════════════════════════════════════════════╣${NC}"
-printf "${P}║${NC} ${C}Users:${Y} %-4s ${P}│${C} Online:${G} %-4s ${P}│${C} Expired:${R} %-4s ${P}│${C} Block:${R} %-4s ${P}║\n" "$(get_total)" "$(get_online)" "$(get_expired)" "$(get_blocked)"
-printf "${P}║${NC} ${B}IP:${W} %-15s ${P}│${B} Port:${W} %-8s ${P}│${B} Limiter:${NC} %-8s ${P}║\n" "$IP" "$XP" "$LMT_STAT"
-echo -e "${P}╟──────────────────────────────────────────────────────────────╢${NC}"
-# Protocolos Centralizados com WS/SOCKS no lugar de PYTHON
-printf "${P}║${NC}      ${Y}XRAY:${NC} $(check_proto xray)  ${P}│${Y}  SLOWDNS:${NC} $(check_proto dnstt)  ${P}│${Y}  WS/SOCKS:${NC} $(check_proto proxy.py)      ${P}║\n"
-echo -e "${P}╟──────────────────────────────────────────────────────────────╢${NC}"
-printf "${P}║${NC} CPU  %-65s ${P}║\n" "$(bar $CPU)"
-printf "${P}║${NC} RAM  %-65s ${P}║\n" "$(bar $RAM)"
-printf "${P}║${NC} DISK %-65s ${P}║\n" "$(bar $DISK)"
-echo -e "${P}╠══════════════════════════════════════════════════════════════╣${NC}"
-printf "${P}║${GD} 01) Criar Usuário           ${P}│${C} 11)${G} Ativar Limiter           ${P}║\n"
-printf "${P}║${GD} 02) Criar Teste             ${P}│${C} 12)${R} Parar Limiter            ${P}║\n"
-printf "${P}║${C} 03)${Y} Remover Usuário         ${P}│${P} 13) Teste Velocidade         ${P}║\n"
-printf "${P}║${C} 04)${Y} Listar Usuários         ${P}│${C} 14)${B} WebSocket Manager        ${P}║\n"
-printf "${P}║${C} 05)${Y} Usuários Online         ${P}│${C} 15)${B} SlowDNS Manager          ${P}║\n"
-printf "${P}║${C} 06)${Y} Ver Bloqueados          ${P}│${C} 16)${B} Xray Manager             ${P}║\n"
-printf "${P}║${C} 07)${Y} Desbloquear Usuário     ${P}│${C} 17)${C} Monitor Tempo Real       ${P}║\n"
-printf "${P}║${C} 08)${Y} Limpar Bloqueios        ${P}│${C} 18)${C} Ver Logs                 ${P}║\n"
-printf "${P}║${C} 09)${G} Reiniciar Xray          ${P}│${C} 19)${C} Backup Config            ${P}║\n"
-printf "${P}║${W} 10) Reparar Sistema         ${P}│${R} 00) Sair                     ${P}║\n"
-echo -e "${P}╚══════════════════════════════════════════════════════════════╝${NC}"
-echo -ne "${Y}✨ Escolha uma opção: ${NC}"; read op
+# MENU PRINCIPAL (ESTILO ABERTO - SEM BORDA DIREITA)
+echo -e "${P}╔══════════════════════════════════════════════════════════════${NC}"
+echo -e "${P}║${C}                🚀 PAINEL NETSIMON 2.0 🚀                    ${NC}"
+echo -e "${P}╠══════════════════════════════════════════════════════════════${NC}"
+printf "${P}║${NC} ${C}Users:${O} %-4s ${P}│${C} Online:${G} %-4s ${P}│${C} Expired:${R} %-4s ${P}│${C} Block:${R} %-4s ${NC}\n" "$(get_total)" "$(get_online)" "$(get_expired)" "$(get_blocked)"
+printf "${P}║${NC} ${B}IP:${W} %-15s ${P}│${B} Port:${W} %-8s ${P}│${B} Hora:${W} %-10s ${NC}\n" "$IP" "$XP" "$HORA"
+echo -e "${P}╟──────────────────────────────────────────────────────────────${NC}"
+printf "${P}║${NC}      ${O}XRAY:${NC} $(check_proto xray)  ${P}│${O}  SLOWDNS:${NC} $(check_proto dnstt)  ${P}│${O}  WS/SOCKS:${NC} $(check_proto proxy.py)      ${NC}\n"
+echo -e "${P}╟──────────────────────────────────────────────────────────────${NC}"
+printf "${P}║${NC} CPU  %-65b ${NC}\n" "$(bar $CPU)"
+printf "${P}║${NC} RAM  %-65b ${NC}\n" "$(bar $RAM)"
+printf "${P}║${NC} DISK %-65b ${NC}\n" "$(bar $DISK)"
+echo -e "${P}╠══════════════════════════════════════════════════════════════${NC}"
+printf "${P}║${GD} 01) Criar Usuário           ${P}│${C} 11)${G} Ativar Limiter           ${NC}\n"
+printf "${P}║${GD} 02) Criar Teste             ${P}│${C} 12)${R} Parar Limiter            ${NC}\n"
+printf "${P}║${C} 03)${O} Remover Usuário         ${P}│${P} 13) Teste Velocidade         ${NC}\n"
+printf "${P}║${C} 04)${O} Listar Usuários         ${P}│${C} 14)${B} WebSocket Manager        ${NC}\n"
+printf "${P}║${C} 05)${O} Usuários Online         ${P}│${C} 15)${B} SlowDNS Manager          ${NC}\n"
+printf "${P}║${C} 06)${O} Ver Bloqueados          ${P}│${C} 16)${B} Xray Manager             ${NC}\n"
+printf "${P}║${C} 07)${O} Desbloquear Usuário     ${P}│${C} 17)${C} Monitor Tempo Real       ${NC}\n"
+printf "${P}║${C} 08)${O} Limpar Bloqueios        ${P}│${C} 18)${C} Ver Logs                 ${NC}\n"
+printf "${P}║${C} 09)${G} Reiniciar Xray          ${P}│${C} 19)${C} Backup Config            ${NC}\n"
+printf "${P}║${W} 10) ♻️ Reparar Sistema       ${P}│${R} 00) Sair                     ${NC}\n"
+echo -e "${P}╚══════════════════════════════════════════════════════════════${NC}"
+echo -ne "${O}✨ Escolha uma opção: ${NC}"; read op
 
 case $op in
     1|01) bash "$BASE/adduser.sh" ;;
     2|02) bash "$BASE/addtest.sh" ;;
     3|03) bash "$BASE/deluser.sh" ;;
-    4|04) clear; echo -e "${P}LISTA DE USUÁRIOS${NC}"; [ -s "$USERDB" ] && column -t -s "|" "$USERDB" || echo -e "${R}Banco vazio!${NC}"; echo ""; read -p "Pressione ENTER..." ;;
+    4|04) 
+        clear
+        echo -e "${P}╔══════════════════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${P}║${NC} ${O}USUÁRIO   SENHA      UUID                                   DATA   LIM. ${NC}"
+        echo -e "${P}╠══════════════════════════════════════════════════════════════════════════════${NC}"
+        if [ -s "$USERDB" ]; then
+            while IFS='|' read -r user uuid exp pass lim; do
+                data_formatada=$(date -d "$exp" +"%d/%m" 2>/dev/null)
+                [ -z "$data_formatada" ] && data_formatada="--/--"
+                printf "${P}║${W} %-9s %-10s %-38s %-6s %-4s ${NC}\n" "$user" "$pass" "$uuid" "$data_formatada" "$lim"
+                echo -e "${P}╟──────────────────────────────────────────────────────────────────────────────${NC}"
+            done < "$USERDB"
+        else
+            echo -e "${P}║${R}                        NENHUM USUÁRIO ENCONTRADO!                            ${NC}"
+        fi
+        echo -e "${P}╚══════════════════════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        read -p "Pressione ENTER para voltar..." ;;
     5|05) bash "$BASE/online.sh" ;;
     6|06) clear; [ -s "$BLOCKED" ] && cat "$BLOCKED" || echo -e "${R}Nenhum bloqueio.${NC}"; echo ""; read -p "Pressione ENTER..." ;;
     7|07) bash "$BASE/unblock.sh" ;;
@@ -125,7 +138,7 @@ case $op in
         read -p "Pressione ENTER para voltar..." ;;
     19)
         clear
-        echo -e "${Y}Gerando backup em /root/...${NC}"
+        echo -e "${O}Gerando backup em /root/...${NC}"
         BKP_NAME="/root/backup_netsimon_$(date +%d%m%y).tar.gz"
         tar -czf "$BKP_NAME" "$BASE" "/etc/xray" "/usr/local/etc/xray" 2>/dev/null
         echo -e "${G}✅ Backup criado: $BKP_NAME${NC}"; sleep 3 ;;
