@@ -1,68 +1,113 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+# ==========================================
+#   NETSIMON PROXY - WebSocket/SOCKS 2.1
+# ==========================================
 import socket, threading, sys
 
-# Configurações padrão
 SSH_HOST = '127.0.0.1'
 SSH_PORT = 22
 BUFFER_SIZE = 8192
+STATUS_MSG = "netsimon"  # Mensagem customizada no status 101
 
 def handle_client(client_socket):
+    target_socket = None
     try:
-        # Espia os primeiros bytes para decidir o protocolo
         request = client_socket.recv(BUFFER_SIZE)
         if not request:
+            client_socket.close()
             return
-            
+
         header = request.decode('utf-8', errors='ignore')
-        
-        # Lógica para WebSocket (Cloudflare/CDN)
-        if "Upgrade: websocket" in header or "Connection: Upgrade" in header:
+        # FIX: comparação case-insensitive (app envia "Websocket" com W maiúsculo,
+        # e o Cloudflare normaliza headers para lowercase na origem)
+        header_lower = header.lower()
+        is_websocket = (
+            "upgrade: websocket" in header_lower or
+            "connection: upgrade" in header_lower
+        )
+
+        if is_websocket:
+            # FIX: status customizado (igual servidor 1 que funciona)
             response = (
-                "HTTP/1.1 101 Switching Protocols\r\n"
+                f"HTTP/1.1 101 {STATUS_MSG}\r\n"
                 "Upgrade: websocket\r\n"
                 "Connection: Upgrade\r\n\r\n"
             )
             client_socket.sendall(response.encode())
-        
+
         # Conecta ao SSH local
         target_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        target_socket.settimeout(10)
         target_socket.connect((SSH_HOST, SSH_PORT))
-        
-        # Se não for WS, enviamos o que já lemos para o SSH direto (Socks/HTTP Proxy)
-        if "Upgrade: websocket" not in header:
+        target_socket.settimeout(None)
+
+        # Só encaminha o request bruto se NÃO for WebSocket
+        if not is_websocket:
             target_socket.sendall(request)
 
-        # Inicia a ponte
-        threading.Thread(target=forward, args=(client_socket, target_socket), daemon=True).start()
-        threading.Thread(target=forward, args=(target_socket, client_socket), daemon=True).start()
-        
+        # Inicia a ponte bidirecional
+        t1 = threading.Thread(
+            target=forward, args=(client_socket, target_socket), daemon=True
+        )
+        t2 = threading.Thread(
+            target=forward, args=(target_socket, client_socket), daemon=True
+        )
+        t1.start()
+        t2.start()
+
+    except ConnectionRefusedError:
+        # SSH não está acessível na porta configurada
+        pass
     except Exception:
-        client_socket.close()
+        pass
+    finally:
+        # Só fecha se os threads não foram iniciados (erro antes do start)
+        # Os threads fecham os sockets quando terminam
+        pass
+
 
 def forward(source, destination):
     try:
         while True:
             data = source.recv(BUFFER_SIZE)
-            if not data: break
+            if not data:
+                break
             destination.sendall(data)
-    except Exception: pass
+    except Exception:
+        pass
     finally:
-        source.close()
-        destination.close()
+        try:
+            source.close()
+        except Exception:
+            pass
+        try:
+            destination.close()
+        except Exception:
+            pass
+
 
 def main(port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         server.bind(('0.0.0.0', port))
-    except:
+    except Exception as e:
+        print(f"[ERRO] Bind na porta {port} falhou: {e}")
         sys.exit(1)
-    server.listen(100)
+
+    server.listen(200)
+    print(f"[OK] Proxy escutando na porta {port}")
+
     while True:
-        client, _ = server.accept()
-        threading.Thread(target=handle_client, args=(client,), daemon=True).start()
+        try:
+            client, addr = server.accept()
+            threading.Thread(
+                target=handle_client, args=(client,), daemon=True
+            ).start()
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     listen_port = int(sys.argv[1]) if len(sys.argv) > 1 else 80
